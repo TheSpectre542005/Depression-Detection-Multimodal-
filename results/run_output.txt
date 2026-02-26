@@ -1,0 +1,242 @@
+=======================================================
+   DEPRESSION DETECTION — MULTIMODAL PIPELINE
+=======================================================
+
+📋 Loading labels...
+  Total: 219 | Depressed: 65 | Not Depressed: 154
+
+📦 Loading features...
+  Text   : (219, 60)
+  Audio  : (219, 249)
+  Visual : (219, 215)
+
+🔗 Merging all features...
+  Merged shape: (219, 524)
+
+  Feature dimensions (raw):
+    Text   : (219, 59)
+    Audio  : (219, 248)
+    Visual : (219, 214)
+
+  Train: 153 | Val: 33 | Test: 33
+  Test  → depressed: 10 | not depressed: 23
+
+  After PCA:
+    Audio  : (219, 248) → (219, 20)  (explained var: 99.8%)
+    Visual : (219, 214) → (219, 20)  (explained var: 100.0%)
+
+🤖 Training unimodal models...
+
+  Training [text] model...
+    Best C=0.05
+    CV Accuracy : 0.536 ± 0.130
+    CV F1-Score : 0.403 ± 0.166
+    ✅ Saved → models/text_model.pkl
+
+  Training [audio] model...
+    Best C=0.5
+    CV Accuracy : 0.640 ± 0.056
+    CV F1-Score : 0.437 ± 0.098
+    ✅ Saved → models/audio_model.pkl
+
+  Training [visual] model...
+    Best C=0.1
+    CV Accuracy : 0.588 ± 0.026
+    CV F1-Score : 0.411 ± 0.096
+    ✅ Saved → models/visual_model.pkl
+
+🎯 Finding best decision thresholds on validation set...
+    Best threshold: 0.51  (F1=0.533)
+    Best threshold: 0.25  (F1=0.450)
+    Best threshold: 0.45  (F1=0.462)
+
+📊 Evaluating on test set...
+
+  [Text Only] threshold=0.51 | predicted depressed: 4/33
+
+==================================================
+  📊 Text Only
+==================================================
+  Accuracy  : 0.7576
+  F1-Score  : 0.4286
+  Precision : 0.7500
+  Recall    : 0.3000
+  AUC-ROC   : 0.5913
+
+               precision    recall  f1-score   support
+
+Not Depressed       0.76      0.96      0.85        23
+    Depressed       0.75      0.30      0.43        10
+
+     accuracy                           0.76        33
+    macro avg       0.75      0.63      0.64        33
+ weighted avg       0.76      0.76      0.72        33
+
+
+  [Audio Only] threshold=0.25 | predicted depressed: 28/33
+
+==================================================
+  📊 Audio Only
+==================================================
+  Accuracy  : 0.3939
+  F1-Score  : 0.4737
+  Precision : 0.3214
+  Recall    : 0.9000
+  AUC-ROC   : 0.5478
+
+               precision    recall  f1-score   support
+
+Not Depressed       0.80      0.17      0.29        23
+    Depressed       0.32      0.90      0.47        10
+
+     accuracy                           0.39        33
+    macro avg       0.56      0.54      0.38        33
+ weighted avg       0.65      0.39      0.34        33
+
+
+  [Visual Only] threshold=0.45 | predicted depressed: 28/33
+
+==================================================
+  📊 Visual Only
+==================================================
+  Accuracy  : 0.4545
+  F1-Score  : 0.5263
+  Precision : 0.3571
+  Recall    : 1.0000
+  AUC-ROC   : 0.6565
+
+               precision    recall  f1-score   support
+
+Not Depressed       1.00      0.22      0.36        23
+    Depressed       0.36      1.00      0.53        10
+
+     accuracy                           0.45        33
+    macro avg       0.68      0.61      0.44        33
+ weighted avg       0.81      0.45      0.41        33
+
+
+🔀 Running late fusion...
+  ⚠️  Excluding [audio] from late fusion (val AUC=0.452 ≤ 0.52)
+  ⚠️  Excluding [visual] from late fusion (val AUC=0.426 ≤ 0.52)
+  Weights: text=1.00, audio=0.00, visual=0.00
+  Best threshold: 0.51  (Val F1=0.533)
+  Predicted depressed: 4/33
+
+==================================================
+  📊 Late Fusion
+==================================================
+  Accuracy  : 0.7576
+  F1-Score  : 0.4286
+  Precision : 0.7500
+  Recall    : 0.3000
+  AUC-ROC   : 0.5913
+
+               precision    recall  f1-score   support
+
+Not Depressed       0.76      0.96      0.85        23
+    Depressed       0.75      0.30      0.43        10
+
+     accuracy                           0.76        33
+    macro avg       0.75      0.63      0.64        33
+ weighted avg       0.76      0.76      0.72        33
+
+
+🧠 Running stacking meta-learner fusion...
+  Meta-learner coefficients: text=0.203, audio=2.773, visual=0.916
+  Best threshold: 0.30  (Val F1=0.488)
+  Predicted depressed: 30/33
+
+==================================================
+  📊 Stacking Fusion
+==================================================
+  Accuracy  : 0.3333
+  F1-Score  : 0.4500
+  Precision : 0.3000
+  Recall    : 0.9000
+  AUC-ROC   : 0.5435
+
+               precision    recall  f1-score   support
+
+Not Depressed       0.67      0.09      0.15        23
+    Depressed       0.30      0.90      0.45        10
+
+     accuracy                           0.33        33
+    macro avg       0.48      0.49      0.30        33
+ weighted avg       0.56      0.33      0.24        33
+
+
+🔗 Running early fusion (all features concatenated)...
+
+  Training [early_fusion] model...
+    Best C=5.0
+    CV Accuracy : 0.614 ± 0.077
+    CV F1-Score : 0.350 ± 0.126
+    ✅ Saved → models/early_fusion_model.pkl
+    Best threshold: 0.43  (F1=0.640)
+  Predicted depressed: 16/33
+
+==================================================
+  📊 Early Fusion
+==================================================
+  Accuracy  : 0.5758
+  F1-Score  : 0.4615
+  Precision : 0.3750
+  Recall    : 0.6000
+  AUC-ROC   : 0.6348
+
+               precision    recall  f1-score   support
+
+Not Depressed       0.76      0.57      0.65        23
+    Depressed       0.38      0.60      0.46        10
+
+     accuracy                           0.58        33
+    macro avg       0.57      0.58      0.56        33
+ weighted avg       0.65      0.58      0.59        33
+
+
+📈 Generating plots...
+  ✅ Saved → results/roc_curves.png
+  ✅ Saved → results/model_comparison.png
+
+  ✅ Results table saved → results/all_results.csv
+          Model  Accuracy     F1  Precision  Recall  AUC-ROC
+      Text Only    0.7576 0.4286     0.7500     0.3   0.5913
+     Audio Only    0.3939 0.4737     0.3214     0.9   0.5478
+    Visual Only    0.4545 0.5263     0.3571     1.0   0.6565
+    Late Fusion    0.7576 0.4286     0.7500     0.3   0.5913
+Stacking Fusion    0.3333 0.4500     0.3000     0.9   0.5435
+   Early Fusion    0.5758 0.4615     0.3750     0.6   0.6348
+
+=======================================================
+  ✅ PIPELINE COMPLETE
+  📁 Check results/ folder for all outputs
+=======================================================
+  File "C:\Users\Rishil\anaconda3\Lib\site-packages\joblib\externals\loky\backend\context.py", line 257, in _count_physical_cores
+    cpu_info = subprocess.run(
+        "wmic CPU Get NumberOfCores /Format:csv".split(),
+        capture_output=True,
+        text=True,
+    )
+  File "C:\Users\Rishil\anaconda3\Lib\subprocess.py", line 554, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Rishil\anaconda3\Lib\subprocess.py", line 1039, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                        pass_fds, cwd, env,
+                        ^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+                        gid, gids, uid, umask,
+                        ^^^^^^^^^^^^^^^^^^^^^^
+                        start_new_session, process_group)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Rishil\anaconda3\Lib\subprocess.py", line 1554, in _execute_child
+    hp, ht, pid, tid = _winapi.CreateProcess(executable, args,
+                       ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+                             # no special security
+                             ^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+                             cwd,
+                             ^^^^
+                             startupinfo)
+                             ^^^^^^^^^^^^

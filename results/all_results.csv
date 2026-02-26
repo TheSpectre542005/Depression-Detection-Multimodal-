@@ -1,0 +1,7 @@
+Model,Accuracy,F1,Precision,Recall,AUC-ROC
+Text Only,0.7576,0.4286,0.75,0.3,0.5913
+Audio Only,0.3939,0.4737,0.3214,0.9,0.5478
+Visual Only,0.4545,0.5263,0.3571,1.0,0.6565
+Late Fusion,0.7576,0.4286,0.75,0.3,0.5913
+Stacking Fusion,0.3333,0.45,0.3,0.9,0.5435
+Early Fusion,0.5758,0.4615,0.375,0.6,0.6348

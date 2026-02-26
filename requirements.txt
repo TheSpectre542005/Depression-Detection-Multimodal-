@@ -1,0 +1,11 @@
+flask>=2.0
+pandas
+numpy
+scikit-learn
+imbalanced-learn
+nltk
+vaderSentiment
+matplotlib
+seaborn
+joblib
+gunicorn

@@ -1,0 +1,21 @@
+# Dependencies
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Data (too large for GitHub)
+data/raw/
+*.wav
+*.mat
+
+# Gemini artifacts
+.gemini/

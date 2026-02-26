@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MindScan — Depression Screening</title>
+  <meta name="description"
+    content="AI-powered multimodal depression screening using text analysis, audio processing, and visual expression detection.">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+</head>
+
+<body>
+
+  <!-- ════════════════════════════════════════════════════════════
+       NAVBAR
+       ════════════════════════════════════════════════════════════ -->
+  <nav class="navbar">
+    <a href="#" class="navbar-brand" onclick="goTo('landing')">
+      <div class="logo">🧠</div>
+      <span>MindScan</span>
+    </a>
+    <div class="navbar-steps">
+      <div class="step-dot active" id="dot-landing"></div>
+      <div class="step-dot" id="dot-phq"></div>
+      <div class="step-dot" id="dot-interview"></div>
+      <div class="step-dot" id="dot-results"></div>
+    </div>
+  </nav>
+
+  <!-- ════════════════════════════════════════════════════════════
+       1. LANDING PAGE
+       ════════════════════════════════════════════════════════════ -->
+  <section id="landing" class="section landing active">
+    <div class="hero">
+      <div class="hero-badge">
+        <span class="dot"></span>
+        Multimodal AI Screening
+      </div>
+      <h1>Depression Detection<br><span class="gradient-text">by Multimodal Analysis</span></h1>
+      <p class="hero-subtitle">
+        A research-grade screening tool that combines text analysis, speech patterns,
+        and facial expression recognition to provide an objective assessment of depression risk.
+      </p>
+      <button class="btn btn-primary btn-lg" onclick="goTo('phq')">
+        Begin Screening →
+      </button>
+    </div>
+
+    <div class="features-grid">
+      <div class="feature-card glass">
+        <div class="feature-icon text">📝</div>
+        <h3>Text Analysis</h3>
+        <p>Sentiment analysis and linguistic markers extracted from interview responses using NLP.</p>
+      </div>
+      <div class="feature-card glass">
+        <div class="feature-icon audio">🎙️</div>
+        <h3>Audio Processing</h3>
+        <p>MFCC and eGeMAPS features capturing speech patterns, pitch, and vocal quality.</p>
+      </div>
+      <div class="feature-card glass">
+        <div class="feature-icon visual">👁️</div>
+        <h3>Visual Detection</h3>
+        <p>Facial action units, head pose, and gaze tracking for expression analysis.</p>
+      </div>
+    </div>
+
+    <div class="disclaimer-bar">
+      ⚠️ This is a screening tool for research purposes only. It does not provide medical diagnosis.
+      Please consult a mental health professional for clinical evaluation.
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════
+       2. PHQ-8 SURVEY
+       ════════════════════════════════════════════════════════════ -->
+  <section id="phq" class="section phq-section">
+    <div class="phq-header">
+      <h2>PHQ-8 Questionnaire</h2>
+      <p>Over the <strong>last 2 weeks</strong>, how often have you been bothered by any of the following?</p>
+    </div>
+
+    <div class="progress-container">
+      <div class="progress-bar">
+        <div class="progress-fill" id="phq-progress"></div>
+      </div>
+      <span class="progress-label" id="phq-progress-label">1 / 8</span>
+    </div>
+
+    <div class="question-card glass" id="phq-question-card">
+      <!-- Dynamically filled by JS -->
+    </div>
+
+    <div class="phq-nav">
+      <button class="btn btn-secondary" id="phq-back-btn" onclick="phqBack()" disabled>← Back</button>
+      <button class="btn btn-primary" id="phq-next-btn" onclick="phqNext()" disabled>Next →</button>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════
+       3. VIRTUAL ASSISTANT INTERVIEW
+       ════════════════════════════════════════════════════════════ -->
+  <section id="interview" class="section interview-section">
+    <div class="interview-layout">
+      <!-- Chat Panel -->
+      <div class="chat-panel glass">
+        <div class="chat-header">
+          <div class="assistant-avatar">🤖</div>
+          <div class="assistant-info">
+            <h3>MindScan Assistant</h3>
+            <div class="status">Online</div>
+          </div>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+          <!-- Messages appear here -->
+        </div>
+        <div class="chat-input-area">
+          <input type="text" class="chat-input" id="chat-input" placeholder="Type your response..."
+            onkeydown="if(event.key==='Enter')sendMessage()">
+          <button class="send-btn" id="send-btn" onclick="sendMessage()">➤</button>
+        </div>
+      </div>
+
+      <!-- Webcam + Progress Panel -->
+      <div class="webcam-panel">
+        <div class="webcam-card glass">
+          <h4>📷 Webcam Feed</h4>
+          <div class="webcam-feed" id="webcam-container">
+            <div class="webcam-placeholder" id="webcam-placeholder">
+              <span class="icon">📷</span>
+              <span>Camera not active</span>
+            </div>
+            <video id="webcam-video" autoplay playsinline style="display:none"></video>
+            <canvas id="webcam-overlay"
+              style="display:none; position:absolute; top:0; left:0; width:100%; height:100%;"></canvas>
+          </div>
+          <div class="expression-live" id="expression-live" style="display:none">
+            <div class="expression-live-label">Detected: <span id="live-expression">—</span></div>
+          </div>
+          <button class="btn btn-secondary webcam-toggle" id="webcam-toggle" onclick="toggleWebcam()">
+            Enable Camera
+          </button>
+        </div>
+
+        <div class="interview-progress glass">
+          <h4>Interview Progress</h4>
+          <div class="q-progress-list" id="q-progress-list">
+            <!-- Filled by JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════
+       4. RESULTS
+       ════════════════════════════════════════════════════════════ -->
+  <section id="results" class="section results-section">
+    <div class="results-header">
+      <h2>Screening Results</h2>
+      <p>Your multimodal depression screening assessment</p>
+    </div>
+
+    <div class="results-grid">
+      <!-- Overall Risk -->
+      <div class="result-card glass overall-card" id="overall-card">
+        <div class="risk-gauge" id="risk-gauge">
+          <svg viewBox="0 0 120 120">
+            <circle class="track" cx="60" cy="60" r="52"></circle>
+            <circle class="fill" id="gauge-fill" cx="60" cy="60" r="52" stroke-dasharray="326.73"
+              stroke-dashoffset="326.73"></circle>
+          </svg>
+          <div class="gauge-label">
+            <span class="gauge-value" id="gauge-value">--</span>
+            <span class="gauge-text">Risk Score</span>
+          </div>
+        </div>
+        <div class="risk-label" id="risk-label">Analyzing...</div>
+      </div>
+
+      <!-- PHQ-8 Results -->
+      <div class="result-card glass" id="phq-result-card">
+        <div class="result-card-header">
+          <h3>📋 PHQ-8 Score</h3>
+          <span class="result-badge" id="phq-badge">--</span>
+        </div>
+        <div class="score-bar">
+          <div class="score-bar-label">
+            <span>Clinical Score</span>
+            <span id="phq-score-val">-- / 24</span>
+          </div>
+          <div class="score-bar-track">
+            <div class="score-bar-fill" id="phq-score-bar" style="width:0; background: var(--gradient-main)"></div>
+          </div>
+        </div>
+        <p style="font-size:0.82rem; color:var(--text-muted); margin-top:12px" id="phq-severity-text"></p>
+      </div>
+
+      <!-- Text Analysis -->
+      <div class="result-card glass" id="text-result-card">
+        <div class="result-card-header">
+          <h3>📝 Text Analysis</h3>
+          <span class="result-badge" id="text-badge">--</span>
+        </div>
+        <div class="score-bar">
+          <div class="score-bar-label">
+            <span>Depression Probability</span>
+            <span id="text-prob-val">--%</span>
+          </div>
+          <div class="score-bar-track">
+            <div class="score-bar-fill" id="text-prob-bar" style="width:0; background: var(--gradient-btn)"></div>
+          </div>
+        </div>
+        <div class="sentiment-bars" id="sentiment-bars">
+          <!-- Filled by JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Visual Analysis -->
+    <div class="result-card glass" id="visual-result-card">
+      <div class="result-card-header">
+        <h3>👁️ Facial Analysis</h3>
+        <span class="result-badge" id="visual-badge">--</span>
+      </div>
+      <div class="score-bar">
+        <div class="score-bar-label">
+          <span>Flat Affect Score</span>
+          <span id="visual-flat-val">--%</span>
+        </div>
+        <div class="score-bar-track">
+          <div class="score-bar-fill" id="visual-flat-bar" style="width:0; background: var(--gradient-main)"></div>
+        </div>
+      </div>
+      <div class="expression-chart" id="expression-chart">
+        <!-- Filled by JS -->
+      </div>
+      <p style="font-size:0.78rem; color:var(--text-muted); margin-top:12px" id="visual-note"></p>
+    </div>
+    </div>
+
+    <div class="result-disclaimer">
+      ⚠️ <strong>Important:</strong> This screening tool is for research and educational purposes only.
+      It is NOT a medical diagnosis. If you or someone you know is struggling with depression,
+      please contact a licensed mental health professional or call a crisis helpline.
+    </div>
+
+    <button class="btn btn-secondary restart-btn" onclick="restart()">↻ Start Over</button>
+  </section>
+
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loading" style="display:none">
+    <div class="spinner"></div>
+    <p id="loading-text">Analyzing your responses...</p>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+
+</html>
