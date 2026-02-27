@@ -1300,6 +1300,151 @@ body::after {
   transform: none;
 }
 
+/* ── Mic Button ─────────────────────────────────────────────────── */
+.mic-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-1);
+  color: var(--text-3);
+  font-size: 20px;
+  cursor: pointer;
+  transition: all 0.3s var(--ease-out);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mic-btn:hover {
+  background: rgba(79, 142, 247, 0.1);
+  border-color: rgba(79, 142, 247, 0.3);
+  color: var(--accent-1);
+}
+
+.mic-btn.recording {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #EF4444;
+  animation: micPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes micPulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.3);
+  }
+
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+}
+
+/* ── Audio Waveform Visualizer ──────────────────────────────────── */
+.audio-visualizer {
+  padding: 8px 24px;
+  border-top: 1px solid var(--border-1);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.audio-visualizer canvas {
+  flex: 1;
+  height: 40px;
+  border-radius: 6px;
+}
+
+.rec-badge {
+  font: 600 0.7rem var(--font-mono);
+  color: #EF4444;
+  animation: recBlink 1s steps(1) infinite;
+  white-space: nowrap;
+}
+
+@keyframes recBlink {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ── Mira Speaking Indicator ────────────────────────────────────── */
+.mira-speaking {
+  padding: 10px 24px;
+  border-top: 1px solid var(--border-1);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(79, 142, 247, 0.04);
+}
+
+.speaking-waves {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  height: 20px;
+}
+
+.speaking-waves span {
+  width: 3px;
+  background: var(--accent-1);
+  border-radius: 100px;
+  animation: speakWave 0.8s ease-in-out infinite;
+}
+
+.speaking-waves span:nth-child(1) {
+  animation-delay: 0s;
+  height: 8px;
+}
+
+.speaking-waves span:nth-child(2) {
+  animation-delay: 0.1s;
+  height: 16px;
+}
+
+.speaking-waves span:nth-child(3) {
+  animation-delay: 0.2s;
+  height: 12px;
+}
+
+.speaking-waves span:nth-child(4) {
+  animation-delay: 0.3s;
+  height: 18px;
+}
+
+.speaking-waves span:nth-child(5) {
+  animation-delay: 0.15s;
+  height: 10px;
+}
+
+@keyframes speakWave {
+
+  0%,
+  100% {
+    transform: scaleY(0.4);
+    opacity: 0.5;
+  }
+
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+.speaking-text {
+  font: 500 0.8rem var(--font-ui);
+  color: var(--accent-1);
+}
+
 /* Webcam Panel */
 .webcam-panel {
   display: flex;

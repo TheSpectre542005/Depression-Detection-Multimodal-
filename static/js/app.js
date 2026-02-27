@@ -20,6 +20,17 @@ let expressionHistory = [];
 let faceDetectedCount = 0;
 let totalDetectionAttempts = 0;
 
+// Audio state — TTS + STT
+let isSpeaking = false;
+let isRecording = false;
+let recognition = null;
+let audioContext = null;
+let analyser = null;
+let micStream = null;
+let waveformAnimId = null;
+let recTimerInterval = null;
+let recSeconds = 0;
+
 // ────────────────────────────────────────────────────────────────
 //  INIT ON LOAD
 // ────────────────────────────────────────────────────────────────
@@ -283,8 +294,208 @@ function askQuestion(idx) {
     setTimeout(() => {
         typingDiv.remove();
         addMessage('assistant', INTERVIEW_QUESTIONS[idx]);
+        // Speak the question aloud via TTS
+        speakText(INTERVIEW_QUESTIONS[idx]);
         document.getElementById('chat-input').focus();
     }, 1200);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  TEXT-TO-SPEECH (Mira speaks)
+// ═══════════════════════════════════════════════════════════════════
+function speakText(text) {
+    if (!('speechSynthesis' in window)) return;
+    // Cancel any ongoing speech
+    window.speechSynthesis.cancel();
+    // Strip markdown formatting
+    const cleanText = text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n/g, '. ');
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.rate = 0.95;
+    utterance.pitch = 1.1;
+    utterance.volume = 1;
+
+    // Try to pick a female English voice
+    const voices = window.speechSynthesis.getVoices();
+    const femaleVoice = voices.find(v =>
+        v.lang.startsWith('en') && (v.name.includes('Female') || v.name.includes('Zira') ||
+            v.name.includes('Samantha') || v.name.includes('Google UK English Female') ||
+            v.name.includes('Microsoft Zira'))
+    ) || voices.find(v => v.lang.startsWith('en'));
+    if (femaleVoice) utterance.voice = femaleVoice;
+
+    // Show speaking indicator
+    utterance.onstart = () => {
+        isSpeaking = true;
+        const indicator = document.getElementById('mira-speaking');
+        if (indicator) indicator.style.display = 'flex';
+    };
+    utterance.onend = () => {
+        isSpeaking = false;
+        const indicator = document.getElementById('mira-speaking');
+        if (indicator) indicator.style.display = 'none';
+    };
+    utterance.onerror = () => {
+        isSpeaking = false;
+        const indicator = document.getElementById('mira-speaking');
+        if (indicator) indicator.style.display = 'none';
+    };
+
+    window.speechSynthesis.speak(utterance);
+}
+
+// Load voices (some browsers load them asynchronously)
+if ('speechSynthesis' in window) {
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SPEECH-TO-TEXT (User speaks)
+// ═══════════════════════════════════════════════════════════════════
+function toggleMic() {
+    if (isRecording) {
+        stopRecording();
+    } else {
+        startRecording();
+    }
+}
+
+function startRecording() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        alert('Speech recognition is not supported in your browser. Please use Chrome or Edge.');
+        return;
+    }
+
+    // Stop Mira from speaking if she is
+    if (isSpeaking) window.speechSynthesis.cancel();
+
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    const input = document.getElementById('chat-input');
+    const micBtn = document.getElementById('mic-btn');
+    let finalTranscript = '';
+
+    recognition.onresult = (event) => {
+        let interimTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+                finalTranscript += event.results[i][0].transcript + ' ';
+            } else {
+                interimTranscript += event.results[i][0].transcript;
+            }
+        }
+        input.value = finalTranscript + interimTranscript;
+    };
+
+    recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        stopRecording();
+    };
+
+    recognition.onend = () => {
+        // If still recording (not manually stopped), auto-send
+        if (isRecording) {
+            stopRecording();
+            if (input.value.trim()) {
+                sendMessage();
+            }
+        }
+    };
+
+    recognition.start();
+    isRecording = true;
+    micBtn.classList.add('recording');
+    micBtn.innerHTML = '⏹';
+
+    // Start audio visualizer
+    startAudioVisualizer();
+
+    // Start REC timer
+    recSeconds = 0;
+    const timerEl = document.getElementById('rec-timer');
+    recTimerInterval = setInterval(() => {
+        recSeconds++;
+        const mins = Math.floor(recSeconds / 60).toString().padStart(2, '0');
+        const secs = (recSeconds % 60).toString().padStart(2, '0');
+        timerEl.textContent = `${mins}:${secs}`;
+    }, 1000);
+}
+
+function stopRecording() {
+    if (recognition) {
+        isRecording = false;
+        recognition.stop();
+        recognition = null;
+    }
+
+    const micBtn = document.getElementById('mic-btn');
+    micBtn.classList.remove('recording');
+    micBtn.innerHTML = '🎤';
+
+    // Stop visualizer
+    stopAudioVisualizer();
+
+    // Stop timer
+    if (recTimerInterval) { clearInterval(recTimerInterval); recTimerInterval = null; }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  AUDIO WAVEFORM VISUALIZER
+// ═══════════════════════════════════════════════════════════════════
+async function startAudioVisualizer() {
+    const visualizer = document.getElementById('audio-visualizer');
+    const canvas = document.getElementById('audio-canvas');
+    visualizer.style.display = 'flex';
+
+    try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(micStream);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        const ctx = canvas.getContext('2d');
+
+        function drawWaveform() {
+            waveformAnimId = requestAnimationFrame(drawWaveform);
+            analyser.getByteFrequencyData(dataArray);
+
+            canvas.width = canvas.offsetWidth;
+            const width = canvas.width;
+            const height = canvas.height;
+            ctx.clearRect(0, 0, width, height);
+
+            const barWidth = (width / bufferLength) * 2;
+            let x = 0;
+
+            for (let i = 0; i < bufferLength; i++) {
+                const barHeight = (dataArray[i] / 255) * height;
+                const gradient = ctx.createLinearGradient(0, height, 0, height - barHeight);
+                gradient.addColorStop(0, '#4F8EF7');
+                gradient.addColorStop(1, '#9B6FFF');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(x, height - barHeight, barWidth - 1, barHeight);
+                x += barWidth;
+            }
+        }
+        drawWaveform();
+    } catch (err) {
+        console.error('Audio visualizer error:', err);
+    }
+}
+
+function stopAudioVisualizer() {
+    if (waveformAnimId) { cancelAnimationFrame(waveformAnimId); waveformAnimId = null; }
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    if (audioContext) { audioContext.close(); audioContext = null; }
+    const visualizer = document.getElementById('audio-visualizer');
+    if (visualizer) visualizer.style.display = 'none';
 }
 
 function addMessage(role, text) {
@@ -649,6 +860,9 @@ function restart() {
     document.getElementById('chat-input').disabled = false;
     document.getElementById('send-btn').disabled = false;
     stopFaceDetection();
+    stopRecording();
+    stopAudioVisualizer();
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     if (webcamStream) {
         webcamStream.getTracks().forEach(t => t.stop());
         webcamStream = null;

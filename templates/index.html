@@ -292,9 +292,24 @@
           </div>
         </div>
         <div class="chat-messages" id="chat-messages"></div>
+        <!-- Mira speaking indicator -->
+        <div class="mira-speaking" id="mira-speaking" style="display:none">
+          <div class="speaking-waves">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <span class="speaking-text">Mira is speaking...</span>
+        </div>
+        <!-- Audio waveform visualizer -->
+        <div class="audio-visualizer" id="audio-visualizer" style="display:none">
+          <canvas id="audio-canvas" height="40"></canvas>
+          <span class="rec-badge" id="rec-badge">● REC <span id="rec-timer">00:00</span></span>
+        </div>
         <div class="chat-input-area">
-          <input type="text" class="chat-input" id="chat-input" placeholder="Type your response..."
+          <input type="text" class="chat-input" id="chat-input" placeholder="Type or use mic..."
             onkeypress="if(event.key==='Enter') sendMessage()">
+          <button class="mic-btn" id="mic-btn" onclick="toggleMic()" title="Hold to speak">
+            🎤
+          </button>
           <button class="send-btn" id="send-btn" onclick="sendMessage()">▶</button>
         </div>
       </div>
