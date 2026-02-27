@@ -4,26 +4,39 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MindScan — Depression Screening</title>
+  <title>MindScan — AI Depression Screening</title>
   <meta name="description"
-    content="AI-powered multimodal depression screening using text analysis, audio processing, and visual expression detection.">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    content="AI-powered multimodal depression screening through text analysis, voice processing, and facial expression recognition.">
+
+  <!-- Fonts: Syne (display) + DM Sans (UI) + Outfit (body) + Space Mono (numbers) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&family=Outfit:wght@300;400&family=Space+Mono:wght@400;700&display=swap"
     rel="stylesheet">
+
   <link rel="stylesheet" href="/static/css/style.css">
   <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 </head>
 
 <body>
 
-  <!-- ════════════════════════════════════════════════════════════
-       NAVBAR
-       ════════════════════════════════════════════════════════════ -->
-  <nav class="navbar">
-    <a href="#" class="navbar-brand" onclick="goTo('landing')">
-      <div class="logo">🧠</div>
-      <span>MindScan</span>
+  <!-- ═══════ NAVBAR ═══════ -->
+  <nav class="navbar" id="main-nav">
+    <a href="/" class="navbar-brand" onclick="event.preventDefault(); restart();">
+      <span class="logo">🧠</span>
+      MINDSCAN
     </a>
-    <div class="navbar-steps">
+    <div class="nav-links" id="nav-links-main">
+      <a href="#how"
+        onclick="event.preventDefault(); document.getElementById('how-section').scrollIntoView({behavior:'smooth'})">How
+        It Works</a>
+      <a href="#analyze"
+        onclick="event.preventDefault(); document.getElementById('analyze-section').scrollIntoView({behavior:'smooth'})">Research</a>
+      <a href="#" onclick="event.preventDefault(); goTo('phq');" class="btn btn-primary"
+        style="padding:10px 24px; font-size:0.85rem;">Start Scan →</a>
+    </div>
+    <div class="navbar-steps" id="nav-steps" style="display:none">
       <div class="step-dot active" id="dot-landing"></div>
       <div class="step-dot" id="dot-phq"></div>
       <div class="step-dot" id="dot-interview"></div>
@@ -31,53 +44,217 @@
     </div>
   </nav>
 
-  <!-- ════════════════════════════════════════════════════════════
-       1. LANDING PAGE
-       ════════════════════════════════════════════════════════════ -->
-  <section id="landing" class="section landing active">
-    <div class="hero">
-      <div class="hero-badge">
-        <span class="dot"></span>
-        Multimodal AI Screening
+  <!-- ═══════ LOADING OVERLAY ═══════ -->
+  <div class="loading-overlay" id="loading">
+    <div class="spinner"></div>
+    <span class="loading-text" id="loading-text">Analyzing responses...</span>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       SECTION 1: LANDING PAGE
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="section landing active" id="landing">
+
+    <!-- ── HERO ────────────────────────── -->
+    <div class="hero-section">
+      <div class="hero-text animate-up">
+        <span class="section-label">AI Mental Health Screening</span>
+        <h1>
+          <span style="font-weight:400; color:var(--text-2)">Understand your</span><br>
+          <span class="bold-line">MIND <span class="accent">DEEPER.</span></span>
+        </h1>
+        <p class="hero-subtitle">
+          Science-backed multimodal analysis of voice, text, and facial expression to provide an objective assessment of
+          depression risk.
+        </p>
+        <div class="hero-actions">
+          <button class="btn btn-primary btn-lg" onclick="goTo('phq')">Start Free Scan →</button>
+          <a href="#how-section" class="btn btn-outline btn-lg"
+            onclick="event.preventDefault(); document.getElementById('how-section').scrollIntoView({behavior:'smooth'})">Learn
+            More</a>
+        </div>
       </div>
-      <h1>Depression Detection<br><span class="gradient-text">by Multimodal Analysis</span></h1>
-      <p class="hero-subtitle">
-        A research-grade screening tool that combines text analysis, speech patterns,
-        and facial expression recognition to provide an objective assessment of depression risk.
-      </p>
-      <button class="btn btn-primary btn-lg" onclick="goTo('phq')">
-        Begin Screening →
-      </button>
+      <div class="hero-visual animate-up" style="--i:1">
+        <div class="neural-sphere">
+          <div class="sphere-lines"></div>
+        </div>
+      </div>
     </div>
 
-    <div class="features-grid">
-      <div class="feature-card glass">
-        <div class="feature-icon text">📝</div>
-        <h3>Text Analysis</h3>
-        <p>Sentiment analysis and linguistic markers extracted from interview responses using NLP.</p>
-      </div>
-      <div class="feature-card glass">
-        <div class="feature-icon audio">🎙️</div>
-        <h3>Audio Processing</h3>
-        <p>MFCC and eGeMAPS features capturing speech patterns, pitch, and vocal quality.</p>
-      </div>
-      <div class="feature-card glass">
-        <div class="feature-icon visual">👁️</div>
-        <h3>Visual Detection</h3>
-        <p>Facial action units, head pose, and gaze tracking for expression analysis.</p>
+    <!-- ── MARQUEE STRIP ───────────────── -->
+    <div class="marquee-strip">
+      <div class="marquee-inner">
+        <span>● MULTIMODAL AI &nbsp;&nbsp; ● PHQ-8 REFERENCED &nbsp;&nbsp; ● VOICE BIOMARKERS &nbsp;&nbsp; ● CLINICALLY
+          INFORMED &nbsp;&nbsp; ● PRIVATE & SECURE &nbsp;&nbsp; ● MULTIMODAL AI &nbsp;&nbsp; ● PHQ-8 REFERENCED
+          &nbsp;&nbsp; ● VOICE BIOMARKERS &nbsp;&nbsp; ● CLINICALLY INFORMED &nbsp;&nbsp; ● PRIVATE & SECURE
+          &nbsp;&nbsp;</span>
+        <span>● MULTIMODAL AI &nbsp;&nbsp; ● PHQ-8 REFERENCED &nbsp;&nbsp; ● VOICE BIOMARKERS &nbsp;&nbsp; ● CLINICALLY
+          INFORMED &nbsp;&nbsp; ● PRIVATE & SECURE &nbsp;&nbsp; ● MULTIMODAL AI &nbsp;&nbsp; ● PHQ-8 REFERENCED
+          &nbsp;&nbsp; ● VOICE BIOMARKERS &nbsp;&nbsp; ● CLINICALLY INFORMED &nbsp;&nbsp; ● PRIVATE & SECURE
+          &nbsp;&nbsp;</span>
       </div>
     </div>
 
-    <div class="disclaimer-bar">
-      ⚠️ This is a screening tool for research purposes only. It does not provide medical diagnosis.
-      Please consult a mental health professional for clinical evaluation.
+    <!-- ── HOW IT WORKS ────────────────── -->
+    <div class="how-section" id="how-section">
+      <div class="container">
+        <div class="animate-up">
+          <span class="section-label">The Process</span>
+          <h2><span class="thin">Three steps.</span><br>One clear picture.</h2>
+        </div>
+        <div class="process-grid stagger">
+          <div class="process-card glass" style="--i:0">
+            <span class="bg-number">01</span>
+            <div class="card-icon step1">📋</div>
+            <h3>Take the PHQ-8 Survey</h3>
+            <p>A validated 8-question clinical questionnaire measuring symptom frequency over the last two weeks.</p>
+          </div>
+          <div class="process-card glass" style="--i:1">
+            <span class="bg-number">02</span>
+            <div class="card-icon step2">💬</div>
+            <h3>Talk to Mira</h3>
+            <p>Our AI virtual assistant guides you through 8 natural questions while analyzing text patterns and facial
+              expressions.</p>
+          </div>
+          <div class="process-card glass" style="--i:2">
+            <span class="bg-number">03</span>
+            <div class="card-icon step3">📊</div>
+            <h3>Receive Your Report</h3>
+            <p>Get an AI-fused screening result combining all three modalities into a comprehensive risk assessment.</p>
+          </div>
+        </div>
+      </div>
     </div>
-  </section>
 
-  <!-- ════════════════════════════════════════════════════════════
-       2. PHQ-8 SURVEY
-       ════════════════════════════════════════════════════════════ -->
-  <section id="phq" class="section phq-section">
+    <!-- ── WHAT WE ANALYZE ─────────────── -->
+    <div class="analyze-section" id="analyze-section">
+      <div class="container">
+        <div class="analyze-text animate-up">
+          <span class="section-label">Multimodal Analysis</span>
+          <h2>We listen to more<br>than words.</h2>
+
+          <div class="analyze-feature" style="--i:0">
+            <span class="feature-pill">T &nbsp;Text Analysis</span>
+            <p>Linguistic patterns, sentiment markers, and PHQ-aligned vocabulary extracted from your interview
+              responses using NLP.</p>
+          </div>
+          <div class="analyze-feature" style="--i:1">
+            <span class="feature-pill">◎ &nbsp;Voice Analysis</span>
+            <p>Pitch, energy, jitter, shimmer — acoustic biomarkers of mood extracted via MFCC and eGeMAPS features.</p>
+          </div>
+          <div class="analyze-feature" style="--i:2">
+            <span class="feature-pill">◈ &nbsp;Facial Expression</span>
+            <p>Action unit intensities, gaze direction, and micro-expressions detected in real-time during your
+              interview.</p>
+          </div>
+        </div>
+
+        <div class="analyze-visual animate-up" style="--i:1">
+          <div class="waveform-row">
+            <span class="waveform-label">Text</span>
+            <div class="waveform-bars" id="wave-text"></div>
+          </div>
+          <div class="waveform-row">
+            <span class="waveform-label">Audio</span>
+            <div class="waveform-bars" id="wave-audio"></div>
+          </div>
+          <div class="waveform-row">
+            <span class="waveform-label">Visual</span>
+            <div class="waveform-bars" id="wave-visual"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TRUST ───────────────────────── -->
+    <div class="trust-section">
+      <div class="container animate-up">
+        <span class="section-label">Built on Trust</span>
+        <div class="trust-grid stagger">
+          <div class="trust-card glass" style="--i:0">
+            <div class="trust-icon">🔒</div>
+            <h3>Private & Secure</h3>
+            <p>Zero data stored. All processing happens in your browser session. Nothing is saved or transmitted to
+              external servers.</p>
+          </div>
+          <div class="trust-card glass" style="--i:1">
+            <div class="trust-icon">🧪</div>
+            <h3>PHQ-8 Referenced</h3>
+            <p>Based on the peer-reviewed Patient Health Questionnaire, a validated clinical instrument used worldwide.
+            </p>
+          </div>
+          <div class="trust-card glass" style="--i:2">
+            <div class="trust-icon">⚕️</div>
+            <h3>Screening Only</h3>
+            <p>Not a clinical diagnosis. Designed to help you understand patterns and seek professional evaluation if
+              needed.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── STATS ───────────────────────── -->
+    <div class="stats-section">
+      <div class="container animate-up">
+        <span class="section-label">MindScan in Numbers</span>
+        <div class="stats-grid stagger">
+          <div class="stat-item" style="--i:0">
+            <div class="stat-number" data-target="300">0</div>
+            <div class="stat-label">Million people affected globally</div>
+          </div>
+          <div class="stat-item" style="--i:1">
+            <div class="stat-number" data-target="29.68" data-suffix="%">0</div>
+            <div class="stat-label">Depression prevalence in our data</div>
+          </div>
+          <div class="stat-item" style="--i:2">
+            <div class="stat-number" data-target="3" data-suffix=" min">0</div>
+            <div class="stat-label">Average scan completion time</div>
+          </div>
+          <div class="stat-item" style="--i:3">
+            <div class="stat-number" data-target="3">0</div>
+            <div class="stat-label">Modalities analyzed together</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CTA ─────────────────────────── -->
+    <div class="cta-section">
+      <div class="animate-up">
+        <h2>Ready to understand yourself?</h2>
+        <p>Take the 3-minute assessment. Completely private.</p>
+        <button class="btn btn-primary btn-lg" onclick="goTo('phq')">Start Your MindScan →</button>
+      </div>
+    </div>
+
+    <!-- ── FOOTER ──────────────────────── -->
+    <footer class="site-footer">
+      <div class="footer-content">
+        <div class="footer-brand">MINDSCAN</div>
+        <div class="footer-tagline">Your mind, understood.</div>
+        <div class="footer-links">
+          <a href="#how-section">How It Works</a>
+          <a href="#analyze-section">Research</a>
+        </div>
+        <div class="footer-disclaimer">
+          ⚠️ <strong>Disclaimer:</strong> MindScan is a screening tool for research and informational purposes only.
+          It is not a medical device and does not provide clinical diagnoses. If you are in crisis,
+          please contact a mental health professional or crisis line immediately.
+          <br><br>
+          <strong>iCall:</strong> 9152987821 &nbsp;|&nbsp; <strong>Vandrevala Foundation:</strong> 1860-2662-345 (24/7)
+        </div>
+        <div class="footer-bottom">© 2025 MindScan. Built for awareness, not diagnosis.</div>
+      </div>
+      <div class="footer-watermark">MINDSCAN</div>
+    </footer>
+
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       SECTION 2: PHQ-8 SURVEY
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="section phq-section" id="phq">
     <div class="phq-header">
       <h2>PHQ-8 Questionnaire</h2>
       <p>Over the <strong>last 2 weeks</strong>, how often have you been bothered by any of the following?</p>
@@ -91,43 +268,41 @@
     </div>
 
     <div class="question-card glass" id="phq-question-card">
-      <!-- Dynamically filled by JS -->
+      <!-- Filled by JS -->
     </div>
 
     <div class="phq-nav">
       <button class="btn btn-secondary" id="phq-back-btn" onclick="phqBack()" disabled>← Back</button>
       <button class="btn btn-primary" id="phq-next-btn" onclick="phqNext()" disabled>Next →</button>
     </div>
-  </section>
+  </div>
 
-  <!-- ════════════════════════════════════════════════════════════
-       3. VIRTUAL ASSISTANT INTERVIEW
-       ════════════════════════════════════════════════════════════ -->
-  <section id="interview" class="section interview-section">
+  <!-- ═══════════════════════════════════════════════════════════════
+       SECTION 3: VIRTUAL INTERVIEW
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="section interview-section" id="interview">
     <div class="interview-layout">
       <!-- Chat Panel -->
       <div class="chat-panel glass">
         <div class="chat-header">
           <div class="assistant-avatar">🤖</div>
           <div class="assistant-info">
-            <h3>MindScan Assistant</h3>
-            <div class="status">Online</div>
+            <h3>Mira</h3>
+            <div class="status">Active</div>
           </div>
         </div>
-        <div class="chat-messages" id="chat-messages">
-          <!-- Messages appear here -->
-        </div>
+        <div class="chat-messages" id="chat-messages"></div>
         <div class="chat-input-area">
           <input type="text" class="chat-input" id="chat-input" placeholder="Type your response..."
-            onkeydown="if(event.key==='Enter')sendMessage()">
-          <button class="send-btn" id="send-btn" onclick="sendMessage()">➤</button>
+            onkeypress="if(event.key==='Enter') sendMessage()">
+          <button class="send-btn" id="send-btn" onclick="sendMessage()">▶</button>
         </div>
       </div>
 
       <!-- Webcam + Progress Panel -->
       <div class="webcam-panel">
         <div class="webcam-card glass">
-          <h4>📷 Webcam Feed</h4>
+          <h4>📷 Expression Analysis</h4>
           <div class="webcam-feed" id="webcam-container">
             <div class="webcam-placeholder" id="webcam-placeholder">
               <span class="icon">📷</span>
@@ -143,46 +318,45 @@
           <button class="btn btn-secondary webcam-toggle" id="webcam-toggle" onclick="toggleWebcam()">
             Enable Camera
           </button>
+          <p style="font-size:0.7rem; color:var(--text-4); margin-top:8px; text-align:center">
+            🔒 Camera data processed locally. Never stored.
+          </p>
         </div>
-
         <div class="interview-progress glass">
           <h4>Interview Progress</h4>
-          <div class="q-progress-list" id="q-progress-list">
-            <!-- Filled by JS -->
-          </div>
+          <div class="q-progress-list" id="q-progress-list"></div>
         </div>
       </div>
     </div>
-  </section>
+  </div>
 
-  <!-- ════════════════════════════════════════════════════════════
-       4. RESULTS
-       ════════════════════════════════════════════════════════════ -->
-  <section id="results" class="section results-section">
-    <div class="results-header">
-      <h2>Screening Results</h2>
+  <!-- ═══════════════════════════════════════════════════════════════
+       SECTION 4: RESULTS
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="section results-section" id="results">
+    <div class="results-header animate-up">
+      <span class="section-label">Your MindScan Result</span>
+      <h2>Assessment Complete</h2>
       <p>Your multimodal depression screening assessment</p>
     </div>
 
-    <div class="results-grid">
-      <!-- Overall Risk -->
-      <div class="result-card glass overall-card" id="overall-card">
-        <div class="risk-gauge" id="risk-gauge">
-          <svg viewBox="0 0 120 120">
-            <circle class="track" cx="60" cy="60" r="52"></circle>
-            <circle class="fill" id="gauge-fill" cx="60" cy="60" r="52" stroke-dasharray="326.73"
-              stroke-dashoffset="326.73"></circle>
-          </svg>
-          <div class="gauge-label">
-            <span class="gauge-value" id="gauge-value">--</span>
-            <span class="gauge-text">Risk Score</span>
-          </div>
-        </div>
-        <div class="risk-label" id="risk-label">Analyzing...</div>
+    <!-- Risk Gauge — gradient border card -->
+    <div class="risk-gauge-card animate-up">
+      <div class="risk-gauge-inner">
+        <svg class="gauge-svg" viewBox="0 0 120 120">
+          <circle class="gauge-bg" cx="60" cy="60" r="52" />
+          <circle class="gauge-fill" id="gauge-fill" cx="60" cy="60" r="52" />
+          <text x="60" y="55" class="gauge-value" id="gauge-value">0%</text>
+          <text x="60" y="72" class="gauge-label">Risk Score</text>
+        </svg>
+        <div id="risk-label">Low Risk</div>
       </div>
+    </div>
 
-      <!-- PHQ-8 Results -->
-      <div class="result-card glass" id="phq-result-card">
+    <!-- PHQ + Text cards -->
+    <div class="result-cards-row">
+      <!-- PHQ-8 Score -->
+      <div class="result-card glass">
         <div class="result-card-header">
           <h3>📋 PHQ-8 Score</h3>
           <span class="result-badge" id="phq-badge">--</span>
@@ -193,14 +367,14 @@
             <span id="phq-score-val">-- / 24</span>
           </div>
           <div class="score-bar-track">
-            <div class="score-bar-fill" id="phq-score-bar" style="width:0; background: var(--gradient-main)"></div>
+            <div class="score-bar-fill" id="phq-score-bar" style="width:0"></div>
           </div>
         </div>
-        <p style="font-size:0.82rem; color:var(--text-muted); margin-top:12px" id="phq-severity-text"></p>
+        <p id="phq-severity-text"></p>
       </div>
 
       <!-- Text Analysis -->
-      <div class="result-card glass" id="text-result-card">
+      <div class="result-card glass">
         <div class="result-card-header">
           <h3>📝 Text Analysis</h3>
           <span class="result-badge" id="text-badge">--</span>
@@ -211,17 +385,15 @@
             <span id="text-prob-val">--%</span>
           </div>
           <div class="score-bar-track">
-            <div class="score-bar-fill" id="text-prob-bar" style="width:0; background: var(--gradient-btn)"></div>
+            <div class="score-bar-fill" id="text-prob-bar" style="width:0"></div>
           </div>
         </div>
-        <div class="sentiment-bars" id="sentiment-bars">
-          <!-- Filled by JS -->
-        </div>
+        <div id="sentiment-bars"></div>
       </div>
     </div>
 
-    <!-- Visual Analysis -->
-    <div class="result-card glass" id="visual-result-card">
+    <!-- Visual Analysis (full width) -->
+    <div class="result-card result-card-full glass" id="visual-result-card">
       <div class="result-card-header">
         <h3>👁️ Facial Analysis</h3>
         <span class="result-badge" id="visual-badge">--</span>
@@ -232,29 +404,24 @@
           <span id="visual-flat-val">--%</span>
         </div>
         <div class="score-bar-track">
-          <div class="score-bar-fill" id="visual-flat-bar" style="width:0; background: var(--gradient-main)"></div>
+          <div class="score-bar-fill" id="visual-flat-bar" style="width:0; background: var(--accent-g)"></div>
         </div>
       </div>
-      <div class="expression-chart" id="expression-chart">
-        <!-- Filled by JS -->
-      </div>
-      <p style="font-size:0.78rem; color:var(--text-muted); margin-top:12px" id="visual-note"></p>
-    </div>
+      <div class="expression-chart" id="expression-chart"></div>
+      <p style="font-size:0.78rem; color:var(--text-4); margin-top:12px" id="visual-note"></p>
     </div>
 
+    <!-- Disclaimer -->
     <div class="result-disclaimer">
       ⚠️ <strong>Important:</strong> This screening tool is for research and educational purposes only.
       It is NOT a medical diagnosis. If you or someone you know is struggling with depression,
       please contact a licensed mental health professional or call a crisis helpline.
     </div>
 
-    <button class="btn btn-secondary restart-btn" onclick="restart()">↻ Start Over</button>
-  </section>
-
-  <!-- Loading Overlay -->
-  <div class="loading-overlay" id="loading" style="display:none">
-    <div class="spinner"></div>
-    <p id="loading-text">Analyzing your responses...</p>
+    <!-- Actions -->
+    <div class="result-actions">
+      <button class="btn btn-outline" onclick="restart()">↻ Start Over</button>
+    </div>
   </div>
 
   <script src="/static/js/app.js"></script>

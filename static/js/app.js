@@ -1,6 +1,8 @@
 // ================================================================
 //  MindScan — Frontend Application Logic
-//  Includes: Navigation, PHQ-8, Interview, Webcam + Face Detection
+//  Medusmo-Inspired Dark Cinematic UI
+//  Includes: Navigation, Scroll Animations, PHQ-8, Interview,
+//            Webcam + Face Detection, Results Rendering
 // ================================================================
 
 // ── State ──────────────────────────────────────────────────────
@@ -14,9 +16,123 @@ let webcamStream = null;
 // Face detection state
 let faceModelsLoaded = false;
 let faceDetectionInterval = null;
-let expressionHistory = [];   // array of {neutral, happy, sad, angry, fearful, disgusted, surprised}
+let expressionHistory = [];
 let faceDetectedCount = 0;
 let totalDetectionAttempts = 0;
+
+// ────────────────────────────────────────────────────────────────
+//  INIT ON LOAD
+// ────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    initScrollAnimations();
+    initWaveforms();
+    initNavScroll();
+    initCounters();
+});
+
+// ── Scroll-triggered animations ─────────────────────────────────
+function initScrollAnimations() {
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('visible');
+                // Trigger children stagger
+                if (entry.target.querySelector('.stagger')) {
+                    const children = entry.target.querySelectorAll('.stagger > *');
+                    children.forEach((child, i) => {
+                        child.style.setProperty('--i', i);
+                        setTimeout(() => child.classList.add('visible'), i * 100);
+                    });
+                }
+            }
+        });
+    }, { threshold: 0.15 });
+
+    document.querySelectorAll('.animate-up').forEach(el => observer.observe(el));
+    // Also observe stagger containers directly
+    document.querySelectorAll('.stagger').forEach(el => {
+        const obs = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const children = entry.target.children;
+                    Array.from(children).forEach((child, i) => {
+                        setTimeout(() => child.classList.add('visible'), i * 120);
+                    });
+                }
+            });
+        }, { threshold: 0.1 });
+        obs.observe(el);
+    });
+}
+
+// ── Animated waveform bars ──────────────────────────────────────
+function initWaveforms() {
+    const colors = { 'wave-text': '#4F8EF7', 'wave-audio': '#9B6FFF', 'wave-visual': '#10B981' };
+    Object.keys(colors).forEach(id => {
+        const container = document.getElementById(id);
+        if (!container) return;
+        const barCount = 40;
+        for (let i = 0; i < barCount; i++) {
+            const bar = document.createElement('span');
+            const h = 15 + Math.random() * 85;
+            bar.style.height = h + '%';
+            bar.style.background = colors[id];
+            bar.style.animationDelay = (Math.random() * 1.5) + 's';
+            bar.style.animationDuration = (1 + Math.random() * 1) + 's';
+            container.appendChild(bar);
+        }
+    });
+}
+
+// ── Navbar scroll behavior ──────────────────────────────────────
+function initNavScroll() {
+    const nav = document.getElementById('main-nav');
+    window.addEventListener('scroll', () => {
+        if (window.scrollY > 50) {
+            nav.classList.add('scrolled');
+        } else {
+            nav.classList.remove('scrolled');
+        }
+    });
+}
+
+// ── Counter animation (stats) ───────────────────────────────────
+function initCounters() {
+    const counters = document.querySelectorAll('.stat-number');
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting && !entry.target.dataset.animated) {
+                entry.target.dataset.animated = 'true';
+                const target = parseFloat(entry.target.dataset.target);
+                const suffix = entry.target.dataset.suffix || '';
+                const isFloat = target % 1 !== 0;
+                const prefix = target >= 300 ? '' : '';  // No prefix needed
+                const postfix = target >= 300 ? 'M+' : suffix;
+                animateCounter(entry.target, target, postfix, isFloat);
+            }
+        });
+    }, { threshold: 0.5 });
+    counters.forEach(c => observer.observe(c));
+}
+
+function animateCounter(el, target, suffix, isFloat) {
+    const duration = 1800;
+    let start = null;
+    const easeOut = t => 1 - Math.pow(1 - t, 3);
+
+    const step = (ts) => {
+        if (!start) start = ts;
+        const progress = Math.min((ts - start) / duration, 1);
+        const val = easeOut(progress) * target;
+        if (isFloat) {
+            el.textContent = val.toFixed(2) + suffix;
+        } else {
+            el.textContent = Math.floor(val) + suffix;
+        }
+        if (progress < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+}
 
 // ── PHQ-8 Questions ────────────────────────────────────────────
 const PHQ_QUESTIONS = [
@@ -39,7 +155,7 @@ const PHQ_OPTIONS = [
 
 // ── Interview Questions ────────────────────────────────────────
 const INTERVIEW_QUESTIONS = [
-    "Hello! I'm the MindScan virtual assistant. I'd like to ask you a few questions to better understand how you've been feeling. There are no right or wrong answers — just share whatever feels comfortable.\n\nLet's start: **How have you been feeling lately?**",
+    "Hello! I'm **Mira**, your MindScan virtual assistant. I'd like to ask you a few questions to better understand how you've been feeling. There are no right or wrong answers — just share whatever feels comfortable.\n\nLet's start: **How have you been feeling lately?**",
     "Thank you for sharing that. **How has your sleep been recently?** Do you have trouble falling asleep, staying asleep, or do you find yourself sleeping too much?",
     "I appreciate you telling me. **How would you describe your energy levels day to day?** Do you feel tired often?",
     "**Have you lost interest or pleasure in activities you used to enjoy?** Things like hobbies, socializing, or work?",
@@ -49,11 +165,27 @@ const INTERVIEW_QUESTIONS = [
     "Thank you for being open with me. Last question: **Is there anything else that has been bothering you recently?** Anything you'd like to share?"
 ];
 
-// ── Navigation ─────────────────────────────────────────────────
+
+// ═══════════════════════════════════════════════════════════════════
+//  NAVIGATION
+// ═══════════════════════════════════════════════════════════════════
 function goTo(sectionId) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     document.getElementById(sectionId).classList.add('active');
 
+    // Nav state
+    const navLinks = document.getElementById('nav-links-main');
+    const navSteps = document.getElementById('nav-steps');
+
+    if (sectionId === 'landing') {
+        navLinks.style.display = 'flex';
+        navSteps.style.display = 'none';
+    } else {
+        navLinks.style.display = 'none';
+        navSteps.style.display = 'flex';
+    }
+
+    // Step dots
     const steps = ['landing', 'phq', 'interview', 'results'];
     steps.forEach((s, i) => {
         const dot = document.getElementById('dot-' + s);
@@ -64,13 +196,15 @@ function goTo(sectionId) {
     });
 
     currentSection = sectionId;
+    window.scrollTo(0, 0);
     if (sectionId === 'phq') renderPhqQuestion();
     if (sectionId === 'interview') startInterview();
 }
 
-// ================================================================
+
+// ═══════════════════════════════════════════════════════════════════
 //  PHQ-8 SURVEY
-// ================================================================
+// ═══════════════════════════════════════════════════════════════════
 function renderPhqQuestion() {
     const card = document.getElementById('phq-question-card');
     card.innerHTML = `
@@ -114,9 +248,10 @@ function phqBack() {
     if (phqIndex > 0) { phqIndex--; renderPhqQuestion(); }
 }
 
-// ================================================================
+
+// ═══════════════════════════════════════════════════════════════════
 //  VIRTUAL ASSISTANT INTERVIEW
-// ================================================================
+// ═══════════════════════════════════════════════════════════════════
 function startInterview() {
     interviewIndex = 0;
     interviewResponses = [];
@@ -165,7 +300,6 @@ function sendMessage() {
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
     if (!text) return;
-
     addMessage('user', text);
     interviewResponses.push(text);
     input.value = '';
@@ -194,10 +328,10 @@ function finishInterview() {
     }, 1500);
 }
 
-// ================================================================
-//  WEBCAM + FACE DETECTION
-// ================================================================
 
+// ═══════════════════════════════════════════════════════════════════
+//  WEBCAM + FACE DETECTION
+// ═══════════════════════════════════════════════════════════════════
 async function loadFaceModels() {
     if (faceModelsLoaded) return;
     try {
@@ -219,7 +353,6 @@ async function toggleWebcam() {
     const liveExpr = document.getElementById('expression-live');
 
     if (webcamStream) {
-        // Turn off
         stopFaceDetection();
         webcamStream.getTracks().forEach(t => t.stop());
         webcamStream = null;
@@ -230,7 +363,6 @@ async function toggleWebcam() {
         placeholder.innerHTML = '<span class="icon">📷</span><span>Camera not active</span>';
         btn.textContent = 'Enable Camera';
     } else {
-        // Turn on
         try {
             placeholder.innerHTML = '<span class="icon">⏳</span><span>Starting camera...</span>';
             webcamStream = await navigator.mediaDevices.getUserMedia({
@@ -241,14 +373,11 @@ async function toggleWebcam() {
             placeholder.style.display = 'none';
             btn.textContent = 'Disable Camera';
 
-            // Load face models and start detection
             if (typeof faceapi !== 'undefined') {
                 liveExpr.style.display = 'block';
                 document.getElementById('live-expression').textContent = 'Loading models...';
                 await loadFaceModels();
-                if (faceModelsLoaded) {
-                    startFaceDetection();
-                }
+                if (faceModelsLoaded) startFaceDetection();
             }
         } catch (err) {
             console.error('Webcam error:', err);
@@ -259,12 +388,9 @@ async function toggleWebcam() {
 
 function startFaceDetection() {
     if (faceDetectionInterval) return;
-    console.log('🎭 Starting face detection...');
-
     faceDetectionInterval = setInterval(async () => {
         const video = document.getElementById('webcam-video');
         if (!video || video.paused || video.ended || !faceModelsLoaded) return;
-
         totalDetectionAttempts++;
         try {
             const detection = await faceapi
@@ -275,109 +401,71 @@ function startFaceDetection() {
                 faceDetectedCount++;
                 const expr = detection.expressions;
                 expressionHistory.push({
-                    neutral: expr.neutral,
-                    happy: expr.happy,
-                    sad: expr.sad,
-                    angry: expr.angry,
-                    fearful: expr.fearful,
-                    disgusted: expr.disgusted,
+                    neutral: expr.neutral, happy: expr.happy, sad: expr.sad,
+                    angry: expr.angry, fearful: expr.fearful, disgusted: expr.disgusted,
                     surprised: expr.surprised,
                 });
-
-                // Find dominant expression
                 const sorted = Object.entries(expr).sort((a, b) => b[1] - a[1]);
                 const dominant = sorted[0];
                 const emojiMap = {
                     neutral: '😐', happy: '😊', sad: '😢', angry: '😠',
                     fearful: '😨', disgusted: '🤢', surprised: '😲'
                 };
-                const liveEl = document.getElementById('live-expression');
-                liveEl.textContent = `${emojiMap[dominant[0]] || ''} ${dominant[0]} (${(dominant[1] * 100).toFixed(0)}%)`;
-
-                // Draw face box on canvas overlay
+                document.getElementById('live-expression').textContent =
+                    `${emojiMap[dominant[0]] || ''} ${dominant[0]} (${(dominant[1] * 100).toFixed(0)}%)`;
                 drawFaceOverlay(detection);
             }
-        } catch (err) {
-            // Silently skip detection errors
-        }
-    }, 2500); // Detect every 2.5 seconds
+        } catch (err) { /* skip */ }
+    }, 2500);
 }
 
 function drawFaceOverlay(detection) {
     const canvas = document.getElementById('webcam-overlay');
     const video = document.getElementById('webcam-video');
     if (!canvas || !video) return;
-
     canvas.style.display = 'block';
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Draw face bounding box (mirror-flipped)
     const box = detection.detection.box;
-    ctx.strokeStyle = '#06d6a0';
+    ctx.strokeStyle = '#10B981';
     ctx.lineWidth = 2;
-    ctx.strokeRect(
-        canvas.width - box.x - box.width, // flip X for mirror
-        box.y, box.width, box.height
-    );
+    ctx.strokeRect(canvas.width - box.x - box.width, box.y, box.width, box.height);
 }
 
 function stopFaceDetection() {
-    if (faceDetectionInterval) {
-        clearInterval(faceDetectionInterval);
-        faceDetectionInterval = null;
-    }
+    if (faceDetectionInterval) { clearInterval(faceDetectionInterval); faceDetectionInterval = null; }
 }
 
 function computeVisualAnalysis() {
-    if (expressionHistory.length === 0) {
-        return null;
-    }
-
-    // Average each expression across all snapshots
+    if (expressionHistory.length === 0) return null;
     const avg = { neutral: 0, happy: 0, sad: 0, angry: 0, fearful: 0, disgusted: 0, surprised: 0 };
     for (const snap of expressionHistory) {
-        for (const key of Object.keys(avg)) {
-            avg[key] += snap[key];
-        }
+        for (const key of Object.keys(avg)) avg[key] += snap[key];
     }
     const n = expressionHistory.length;
-    for (const key of Object.keys(avg)) {
-        avg[key] /= n;
-    }
+    for (const key of Object.keys(avg)) avg[key] /= n;
 
-    // Depression indicators:
-    // - High neutral (flat affect)
-    // - Low happy
-    // - Higher sad
-    // - Less expression variability
     const flatAffect = avg.neutral;
     const sadScore = avg.sad + avg.fearful * 0.5;
     const happyScore = avg.happy;
-
-    // Depression probability from facial analysis (heuristic)
-    // Flat affect + sadness → higher risk, happiness → lower risk
     let visualProb = (flatAffect * 0.4 + sadScore * 0.4 + (1 - happyScore) * 0.2);
     visualProb = Math.max(0, Math.min(1, visualProb));
 
     return {
-        averages: avg,
-        flatAffect: flatAffect,
-        visualProb: visualProb,
+        averages: avg, flatAffect, visualProb,
         samplesCollected: n,
         faceDetectionRate: totalDetectionAttempts > 0 ? faceDetectedCount / totalDetectionAttempts : 0,
     };
 }
 
 
-// ================================================================
+// ═══════════════════════════════════════════════════════════════════
 //  SUBMISSION & RESULTS
-// ================================================================
+// ═══════════════════════════════════════════════════════════════════
 async function submitForAnalysis() {
     showLoading('Analyzing your responses with AI models...');
-
     const interviewText = interviewResponses.join(' ');
     const visualData = computeVisualAnalysis();
 
@@ -385,13 +473,8 @@ async function submitForAnalysis() {
         const response = await fetch('/api/predict', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                phqAnswers: phqAnswers,
-                interviewText: interviewText,
-                visualData: visualData,
-            })
+            body: JSON.stringify({ phqAnswers, interviewText, visualData })
         });
-
         const data = await response.json();
         hideLoading();
         renderResults(data, visualData);
@@ -406,7 +489,7 @@ async function submitForAnalysis() {
 }
 
 function renderResults(data, visualData) {
-    // ── Overall Risk Gauge ────────────────────────────────────
+    // ── Risk Gauge ─────────────────────────────────────────
     const prob = data.combined.probability;
     const pct = Math.round(prob * 100);
     const circumference = 2 * Math.PI * 52;
@@ -414,9 +497,9 @@ function renderResults(data, visualData) {
 
     const gaugeFill = document.getElementById('gauge-fill');
     let strokeColor;
-    if (prob >= 0.6) strokeColor = '#ef4444';
-    else if (prob >= 0.4) strokeColor = '#f59e0b';
-    else strokeColor = '#10b981';
+    if (prob >= 0.6) strokeColor = '#EF4444';
+    else if (prob >= 0.4) strokeColor = '#F59E0B';
+    else strokeColor = '#10B981';
 
     gaugeFill.style.stroke = strokeColor;
     setTimeout(() => { gaugeFill.style.strokeDashoffset = offset; }, 300);
@@ -426,7 +509,7 @@ function renderResults(data, visualData) {
     riskLabel.textContent = data.combined.riskLevel + ' Risk';
     riskLabel.style.color = strokeColor;
 
-    // ── PHQ-8 Card ────────────────────────────────────────────
+    // ── PHQ-8 Card ─────────────────────────────────────────
     const phqScore = data.phq.score;
     document.getElementById('phq-score-val').textContent = `${phqScore} / 24`;
     document.getElementById('phq-score-bar').style.width = (phqScore / 24 * 100) + '%';
@@ -437,14 +520,14 @@ function renderResults(data, visualData) {
 
     const sevDesc = {
         'Minimal': 'Your PHQ-8 score suggests minimal depressive symptoms.',
-        'Mild': 'Your PHQ-8 score suggests mild depressive symptoms. Consider monitoring.',
-        'Moderate': 'Your PHQ-8 score suggests moderate depression. Professional consultation recommended.',
-        'Moderately Severe': 'Your score suggests moderately severe depression. Please seek professional help.',
-        'Severe': 'Your score suggests severe depression. Please contact a healthcare provider promptly.'
+        'Mild': 'Your PHQ-8 score suggests mild symptoms. Consider monitoring.',
+        'Moderate': 'Your score suggests moderate depression. Professional consultation recommended.',
+        'Moderately Severe': 'Your score suggests moderately severe depression. Please seek help.',
+        'Severe': 'Your score suggests severe depression. Contact a healthcare provider.'
     };
     document.getElementById('phq-severity-text').textContent = sevDesc[data.phq.severity] || '';
 
-    // ── Text Analysis Card ────────────────────────────────────
+    // ── Text Analysis Card ─────────────────────────────────
     const textProb = data.text.probability;
     const textPct = Math.round(textProb * 100);
     document.getElementById('text-prob-val').textContent = textPct + '%';
@@ -457,7 +540,7 @@ function renderResults(data, visualData) {
 
     fetchSentiment();
 
-    // ── Visual Analysis Card ──────────────────────────────────
+    // ── Visual Analysis Card ───────────────────────────────
     renderVisualResults(visualData);
 }
 
@@ -472,30 +555,27 @@ function renderVisualResults(visualData) {
         badge.textContent = 'No Data';
         badge.className = 'result-badge moderate';
         flatVal.textContent = 'N/A';
-        chart.innerHTML = '<p style="font-size:0.85rem; color:var(--text-muted)">Camera was not enabled during the interview. Enable the camera next time for facial expression analysis.</p>';
+        chart.innerHTML = '<p style="font-size:0.85rem; color:var(--text-4)">Camera was not enabled during the interview. Enable the camera next time for facial expression analysis.</p>';
         note.textContent = '';
         return;
     }
 
-    // Flat affect score
     const flatPct = Math.round(visualData.flatAffect * 100);
     flatVal.textContent = flatPct + '%';
     flatBar.style.width = flatPct + '%';
 
-    // Badge
     const vp = visualData.visualProb;
     if (vp >= 0.6) { badge.textContent = 'Elevated'; badge.className = 'result-badge high'; }
     else if (vp >= 0.4) { badge.textContent = 'Moderate'; badge.className = 'result-badge moderate'; }
     else { badge.textContent = 'Normal'; badge.className = 'result-badge low'; }
 
-    // Expression breakdown chart
     const emojiMap = {
         neutral: '😐', happy: '😊', sad: '😢', angry: '😠',
         fearful: '😨', disgusted: '🤢', surprised: '😲'
     };
     const colorMap = {
-        neutral: '#64748b', happy: '#10b981', sad: '#4361ee',
-        angry: '#ef4444', fearful: '#f59e0b', disgusted: '#8b5cf6', surprised: '#06d6a0'
+        neutral: '#7B8BA0', happy: '#10B981', sad: '#4F8EF7',
+        angry: '#EF4444', fearful: '#F59E0B', disgusted: '#9B6FFF', surprised: '#06d6a0'
     };
 
     const avg = visualData.averages;
@@ -525,15 +605,15 @@ async function fetchSentiment() {
         });
         const data = await res.json();
         if (data.sentiment) renderSentiment(data.sentiment);
-    } catch (e) { console.error('Sentiment fetch error:', e); }
+    } catch (e) { console.error('Sentiment error:', e); }
 }
 
 function renderSentiment(sentiment) {
     const container = document.getElementById('sentiment-bars');
     const items = [
-        { label: 'Negative', value: sentiment.neg, color: '#ef4444' },
-        { label: 'Neutral', value: sentiment.neu, color: '#64748b' },
-        { label: 'Positive', value: sentiment.pos, color: '#10b981' },
+        { label: 'Negative', value: sentiment.neg, color: '#EF4444' },
+        { label: 'Neutral', value: sentiment.neu, color: '#7B8BA0' },
+        { label: 'Positive', value: sentiment.pos, color: '#10B981' },
     ];
     container.innerHTML = items.map(item => `
     <div class="sentiment-row">
@@ -545,9 +625,10 @@ function renderSentiment(sentiment) {
     </div>`).join('');
 }
 
-// ════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════
 //  UTILITIES
-// ════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 function showLoading(text) {
     document.getElementById('loading-text').textContent = text || 'Loading...';
     document.getElementById('loading').style.display = 'flex';
@@ -573,9 +654,12 @@ function restart() {
         webcamStream = null;
     }
     goTo('landing');
+    // Restore main nav
+    document.getElementById('nav-links-main').style.display = 'flex';
+    document.getElementById('nav-steps').style.display = 'none';
 }
 
-// Keyboard shortcut: 0-3 for PHQ answers
+// Keyboard shortcut: 0-3 for PHQ answers, Enter for next
 document.addEventListener('keydown', (e) => {
     if (currentSection === 'phq' && ['0', '1', '2', '3'].includes(e.key)) {
         selectPhqOption(parseInt(e.key));
