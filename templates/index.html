@@ -8,7 +8,7 @@
   <meta name="description"
     content="AI-powered multimodal depression screening through text analysis, voice processing, and facial expression recognition.">
 
-  <!-- Fonts: Syne (display) + DM Sans (UI) + Outfit (body) + Space Mono (numbers) -->
+  <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
@@ -33,13 +33,14 @@
         It Works</a>
       <a href="#analyze"
         onclick="event.preventDefault(); document.getElementById('analyze-section').scrollIntoView({behavior:'smooth'})">Research</a>
-      <a href="#" onclick="event.preventDefault(); goTo('phq');" class="btn btn-primary"
+      <a href="#" onclick="event.preventDefault(); goTo('setup');" class="btn btn-primary"
         style="padding:10px 24px; font-size:0.85rem;">Start Scan →</a>
     </div>
     <div class="navbar-steps" id="nav-steps" style="display:none">
       <div class="step-dot active" id="dot-landing"></div>
-      <div class="step-dot" id="dot-phq"></div>
+      <div class="step-dot" id="dot-setup"></div>
       <div class="step-dot" id="dot-interview"></div>
+      <div class="step-dot" id="dot-phq"></div>
       <div class="step-dot" id="dot-results"></div>
     </div>
   </nav>
@@ -56,7 +57,7 @@
        ═══════════════════════════════════════════════════════════════ -->
   <div class="section landing active" id="landing">
 
-    <!-- ── HERO ────────────────────────── -->
+    <!-- ── HERO ── -->
     <div class="hero-section">
       <div class="hero-text animate-up">
         <span class="section-label">AI Mental Health Screening</span>
@@ -69,7 +70,7 @@
           depression risk.
         </p>
         <div class="hero-actions">
-          <button class="btn btn-primary btn-lg" onclick="goTo('phq')">Start Free Scan →</button>
+          <button class="btn btn-primary btn-lg" onclick="goTo('setup')">Start Free Scan →</button>
           <a href="#how-section" class="btn btn-outline btn-lg"
             onclick="event.preventDefault(); document.getElementById('how-section').scrollIntoView({behavior:'smooth'})">Learn
             More</a>
@@ -82,7 +83,7 @@
       </div>
     </div>
 
-    <!-- ── MARQUEE STRIP ───────────────── -->
+    <!-- ── MARQUEE STRIP ── -->
     <div class="marquee-strip">
       <div class="marquee-inner">
         <span>● MULTIMODAL AI &nbsp;&nbsp; ● PHQ-8 REFERENCED &nbsp;&nbsp; ● VOICE BIOMARKERS &nbsp;&nbsp; ● CLINICALLY
@@ -96,7 +97,7 @@
       </div>
     </div>
 
-    <!-- ── HOW IT WORKS ────────────────── -->
+    <!-- ── HOW IT WORKS ── -->
     <div class="how-section" id="how-section">
       <div class="container">
         <div class="animate-up">
@@ -106,16 +107,16 @@
         <div class="process-grid stagger">
           <div class="process-card glass" style="--i:0">
             <span class="bg-number">01</span>
-            <div class="card-icon step1">📋</div>
-            <h3>Take the PHQ-8 Survey</h3>
-            <p>A validated 8-question clinical questionnaire measuring symptom frequency over the last two weeks.</p>
+            <div class="card-icon step1">🎙️</div>
+            <h3>Talk to Mira</h3>
+            <p>Our AI assistant asks casual questions about your life while analyzing your text, voice, and facial
+              expressions in real-time.</p>
           </div>
           <div class="process-card glass" style="--i:1">
             <span class="bg-number">02</span>
-            <div class="card-icon step2">💬</div>
-            <h3>Talk to Mira</h3>
-            <p>Our AI virtual assistant guides you through 8 natural questions while analyzing text patterns and facial
-              expressions.</p>
+            <div class="card-icon step2">📋</div>
+            <h3>Quick Questionnaire</h3>
+            <p>A validated 8-question PHQ-8 survey measuring symptom frequency over the last two weeks.</p>
           </div>
           <div class="process-card glass" style="--i:2">
             <span class="bg-number">03</span>
@@ -127,7 +128,7 @@
       </div>
     </div>
 
-    <!-- ── WHAT WE ANALYZE ─────────────── -->
+    <!-- ── WHAT WE ANALYZE ── -->
     <div class="analyze-section" id="analyze-section">
       <div class="container">
         <div class="analyze-text animate-up">
@@ -167,7 +168,7 @@
       </div>
     </div>
 
-    <!-- ── TRUST ───────────────────────── -->
+    <!-- ── TRUST ── -->
     <div class="trust-section">
       <div class="container animate-up">
         <span class="section-label">Built on Trust</span>
@@ -194,7 +195,7 @@
       </div>
     </div>
 
-    <!-- ── STATS ───────────────────────── -->
+    <!-- ── STATS ── -->
     <div class="stats-section">
       <div class="container animate-up">
         <span class="section-label">MindScan in Numbers</span>
@@ -219,16 +220,16 @@
       </div>
     </div>
 
-    <!-- ── CTA ─────────────────────────── -->
+    <!-- ── CTA ── -->
     <div class="cta-section">
       <div class="animate-up">
         <h2>Ready to understand yourself?</h2>
         <p>Take the 3-minute assessment. Completely private.</p>
-        <button class="btn btn-primary btn-lg" onclick="goTo('phq')">Start Your MindScan →</button>
+        <button class="btn btn-primary btn-lg" onclick="goTo('setup')">Start Your MindScan →</button>
       </div>
     </div>
 
-    <!-- ── FOOTER ──────────────────────── -->
+    <!-- ── FOOTER ── -->
     <footer class="site-footer">
       <div class="footer-content">
         <div class="footer-brand">MINDSCAN</div>
@@ -252,33 +253,69 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════
-       SECTION 2: PHQ-8 SURVEY
+       SECTION 2: SETUP / DEVICE CHECK
        ═══════════════════════════════════════════════════════════════ -->
-  <div class="section phq-section" id="phq">
-    <div class="phq-header">
-      <h2>PHQ-8 Questionnaire</h2>
-      <p>Over the <strong>last 2 weeks</strong>, how often have you been bothered by any of the following?</p>
+  <div class="section setup-section" id="setup">
+    <div class="setup-header">
+      <span class="section-label">Device Setup</span>
+      <h2>Let's make sure everything works</h2>
+      <p>MindScan uses your camera and microphone during the interview. Let's verify they work before we begin.</p>
     </div>
 
-    <div class="progress-container">
-      <div class="progress-bar">
-        <div class="progress-fill" id="phq-progress"></div>
+    <div class="setup-grid">
+      <!-- Camera Check -->
+      <div class="setup-card glass">
+        <div class="setup-card-header">
+          <span class="setup-icon">📷</span>
+          <h3>Camera</h3>
+          <span class="setup-status" id="cam-status">Not checked</span>
+        </div>
+        <div class="setup-preview" id="setup-cam-preview">
+          <div class="webcam-placeholder" id="setup-cam-placeholder">
+            <span class="icon">📷</span>
+            <span>Click below to enable</span>
+          </div>
+          <video id="setup-cam-video" autoplay playsinline style="display:none"></video>
+        </div>
+        <button class="btn btn-secondary" id="setup-cam-btn" onclick="setupToggleCamera()">Enable Camera</button>
       </div>
-      <span class="progress-label" id="phq-progress-label">1 / 8</span>
+
+      <!-- Mic Check -->
+      <div class="setup-card glass">
+        <div class="setup-card-header">
+          <span class="setup-icon">🎤</span>
+          <h3>Microphone</h3>
+          <span class="setup-status" id="mic-status">Not checked</span>
+        </div>
+        <div class="setup-preview" id="setup-mic-preview">
+          <canvas id="setup-mic-canvas" height="80"></canvas>
+          <p class="setup-mic-text" id="setup-mic-text">Click below to test your mic</p>
+        </div>
+        <button class="btn btn-secondary" id="setup-mic-btn" onclick="setupToggleMic()">Test Microphone</button>
+      </div>
     </div>
 
-    <div class="question-card glass" id="phq-question-card">
-      <!-- Filled by JS -->
+    <!-- Mira voice test -->
+    <div class="setup-voice-test glass">
+      <div class="setup-card-header">
+        <span class="setup-icon">🔊</span>
+        <h3>Hear Mira</h3>
+        <span class="setup-status" id="voice-status">Not tested</span>
+      </div>
+      <p>Test Mira's voice to make sure you can hear her clearly.</p>
+      <button class="btn btn-secondary" onclick="testMiraVoice()">🔊 Play Mira's Voice</button>
     </div>
 
-    <div class="phq-nav">
-      <button class="btn btn-secondary" id="phq-back-btn" onclick="phqBack()" disabled>← Back</button>
-      <button class="btn btn-primary" id="phq-next-btn" onclick="phqNext()" disabled>Next →</button>
+    <div class="setup-actions">
+      <button class="btn btn-outline" onclick="goTo('landing')">← Back</button>
+      <button class="btn btn-primary btn-lg" id="setup-ready-btn" onclick="goTo('interview')">
+        Everything Works — Start Interview →
+      </button>
     </div>
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════
-       SECTION 3: VIRTUAL INTERVIEW
+       SECTION 3: VIRTUAL INTERVIEW (now before PHQ)
        ═══════════════════════════════════════════════════════════════ -->
   <div class="section interview-section" id="interview">
     <div class="interview-layout">
@@ -305,10 +342,15 @@
           <span class="rec-badge" id="rec-badge">● REC <span id="rec-timer">00:00</span></span>
         </div>
         <div class="chat-input-area">
-          <input type="text" class="chat-input" id="chat-input" placeholder="Type or use mic..."
+          <input type="text" class="chat-input" id="chat-input" placeholder="Type or tap mic to speak..."
             onkeypress="if(event.key==='Enter') sendMessage()">
-          <button class="mic-btn" id="mic-btn" onclick="toggleMic()" title="Hold to speak">
+          <button class="mic-btn" id="mic-btn" onclick="toggleMic()" title="Tap to speak">
             🎤
+          </button>
+          <!-- Playback last recording -->
+          <button class="playback-btn" id="playback-btn" onclick="playbackRecording()" title="Replay your recording"
+            style="display:none">
+            🔊
           </button>
           <button class="send-btn" id="send-btn" onclick="sendMessage()">▶</button>
         </div>
@@ -319,7 +361,7 @@
         <div class="webcam-card glass">
           <h4>📷 Expression Analysis</h4>
           <div class="webcam-feed" id="webcam-container">
-            <div class="webcam-placeholder" id="webcam-placeholder">
+            <div class="webcam-placeholder" id="webcam-placeholder" style="display:none">
               <span class="icon">📷</span>
               <span>Camera not active</span>
             </div>
@@ -330,9 +372,6 @@
           <div class="expression-live" id="expression-live" style="display:none">
             <div class="expression-live-label">Detected: <span id="live-expression">—</span></div>
           </div>
-          <button class="btn btn-secondary webcam-toggle" id="webcam-toggle" onclick="toggleWebcam()">
-            Enable Camera
-          </button>
           <p style="font-size:0.7rem; color:var(--text-4); margin-top:8px; text-align:center">
             🔒 Camera data processed locally. Never stored.
           </p>
@@ -346,7 +385,34 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════
-       SECTION 4: RESULTS
+       SECTION 4: PHQ-8 SURVEY (now after interview)
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="section phq-section" id="phq">
+    <div class="phq-header">
+      <h2>PHQ-8 Questionnaire</h2>
+      <p>Almost done! Over the <strong>last 2 weeks</strong>, how often have you been bothered by any of the following?
+      </p>
+    </div>
+
+    <div class="progress-container">
+      <div class="progress-bar">
+        <div class="progress-fill" id="phq-progress"></div>
+      </div>
+      <span class="progress-label" id="phq-progress-label">1 / 8</span>
+    </div>
+
+    <div class="question-card glass" id="phq-question-card">
+      <!-- Filled by JS -->
+    </div>
+
+    <div class="phq-nav">
+      <button class="btn btn-secondary" id="phq-back-btn" onclick="phqBack()" disabled>← Back</button>
+      <button class="btn btn-primary" id="phq-next-btn" onclick="phqNext()" disabled>Next →</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       SECTION 5: RESULTS
        ═══════════════════════════════════════════════════════════════ -->
   <div class="section results-section" id="results">
     <div class="results-header animate-up">
@@ -355,7 +421,6 @@
       <p>Your multimodal depression screening assessment</p>
     </div>
 
-    <!-- Risk Gauge — gradient border card -->
     <div class="risk-gauge-card animate-up">
       <div class="risk-gauge-inner">
         <svg class="gauge-svg" viewBox="0 0 120 120">
@@ -368,9 +433,7 @@
       </div>
     </div>
 
-    <!-- PHQ + Text cards -->
     <div class="result-cards-row">
-      <!-- PHQ-8 Score -->
       <div class="result-card glass">
         <div class="result-card-header">
           <h3>📋 PHQ-8 Score</h3>
@@ -387,8 +450,6 @@
         </div>
         <p id="phq-severity-text"></p>
       </div>
-
-      <!-- Text Analysis -->
       <div class="result-card glass">
         <div class="result-card-header">
           <h3>📝 Text Analysis</h3>
@@ -407,7 +468,6 @@
       </div>
     </div>
 
-    <!-- Visual Analysis (full width) -->
     <div class="result-card result-card-full glass" id="visual-result-card">
       <div class="result-card-header">
         <h3>👁️ Facial Analysis</h3>
@@ -426,14 +486,12 @@
       <p style="font-size:0.78rem; color:var(--text-4); margin-top:12px" id="visual-note"></p>
     </div>
 
-    <!-- Disclaimer -->
     <div class="result-disclaimer">
       ⚠️ <strong>Important:</strong> This screening tool is for research and educational purposes only.
       It is NOT a medical diagnosis. If you or someone you know is struggling with depression,
       please contact a licensed mental health professional or call a crisis helpline.
     </div>
 
-    <!-- Actions -->
     <div class="result-actions">
       <button class="btn btn-outline" onclick="restart()">↻ Start Over</button>
     </div>

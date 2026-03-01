@@ -1,8 +1,7 @@
 // ================================================================
 //  MindScan — Frontend Application Logic
-//  Medusmo-Inspired Dark Cinematic UI
-//  Includes: Navigation, Scroll Animations, PHQ-8, Interview,
-//            Webcam + Face Detection, Results Rendering
+//  Flow: Landing → Setup → Interview → PHQ-8 → Results
+//  Features: TTS, STT, Audio Recording + Playback, Face Detection
 // ================================================================
 
 // ── State ──────────────────────────────────────────────────────
@@ -13,14 +12,14 @@ let interviewIndex = 0;
 let interviewResponses = [];
 let webcamStream = null;
 
-// Face detection state
+// Face detection
 let faceModelsLoaded = false;
 let faceDetectionInterval = null;
 let expressionHistory = [];
 let faceDetectedCount = 0;
 let totalDetectionAttempts = 0;
 
-// Audio state — TTS + STT
+// Audio TTS + STT
 let isSpeaking = false;
 let isRecording = false;
 let recognition = null;
@@ -31,14 +30,29 @@ let waveformAnimId = null;
 let recTimerInterval = null;
 let recSeconds = 0;
 
+// Audio recording + playback
+let mediaRecorder = null;
+let recordedChunks = [];
+let lastRecordingBlob = null;
+let lastRecordingUrl = null;
+
+// Setup screen state
+let setupCamStream = null;
+let setupMicStream = null;
+let setupMicCtx = null;
+let setupMicAnalyser = null;
+let setupMicAnimId = null;
+
 // ────────────────────────────────────────────────────────────────
-//  INIT ON LOAD
+//  INIT
 // ────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     initScrollAnimations();
     initWaveforms();
     initNavScroll();
     initCounters();
+    // Preload voices
+    if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
 });
 
 // ── Scroll-triggered animations ─────────────────────────────────
@@ -47,10 +61,8 @@ function initScrollAnimations() {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
                 entry.target.classList.add('visible');
-                // Trigger children stagger
                 if (entry.target.querySelector('.stagger')) {
-                    const children = entry.target.querySelectorAll('.stagger > *');
-                    children.forEach((child, i) => {
+                    entry.target.querySelectorAll('.stagger > *').forEach((child, i) => {
                         child.style.setProperty('--i', i);
                         setTimeout(() => child.classList.add('visible'), i * 100);
                     });
@@ -58,17 +70,13 @@ function initScrollAnimations() {
             }
         });
     }, { threshold: 0.15 });
-
     document.querySelectorAll('.animate-up').forEach(el => observer.observe(el));
-    // Also observe stagger containers directly
     document.querySelectorAll('.stagger').forEach(el => {
         const obs = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
-                    const children = entry.target.children;
-                    Array.from(children).forEach((child, i) => {
-                        setTimeout(() => child.classList.add('visible'), i * 120);
-                    });
+                    Array.from(entry.target.children).forEach((child, i) =>
+                        setTimeout(() => child.classList.add('visible'), i * 120));
                 }
             });
         }, { threshold: 0.1 });
@@ -76,38 +84,29 @@ function initScrollAnimations() {
     });
 }
 
-// ── Animated waveform bars ──────────────────────────────────────
 function initWaveforms() {
     const colors = { 'wave-text': '#4F8EF7', 'wave-audio': '#9B6FFF', 'wave-visual': '#10B981' };
     Object.keys(colors).forEach(id => {
         const container = document.getElementById(id);
         if (!container) return;
-        const barCount = 40;
-        for (let i = 0; i < barCount; i++) {
+        for (let i = 0; i < 40; i++) {
             const bar = document.createElement('span');
-            const h = 15 + Math.random() * 85;
-            bar.style.height = h + '%';
+            bar.style.height = (15 + Math.random() * 85) + '%';
             bar.style.background = colors[id];
             bar.style.animationDelay = (Math.random() * 1.5) + 's';
-            bar.style.animationDuration = (1 + Math.random() * 1) + 's';
+            bar.style.animationDuration = (1 + Math.random()) + 's';
             container.appendChild(bar);
         }
     });
 }
 
-// ── Navbar scroll behavior ──────────────────────────────────────
 function initNavScroll() {
     const nav = document.getElementById('main-nav');
     window.addEventListener('scroll', () => {
-        if (window.scrollY > 50) {
-            nav.classList.add('scrolled');
-        } else {
-            nav.classList.remove('scrolled');
-        }
+        nav.classList.toggle('scrolled', window.scrollY > 50);
     });
 }
 
-// ── Counter animation (stats) ───────────────────────────────────
 function initCounters() {
     const counters = document.querySelectorAll('.stat-number');
     const observer = new IntersectionObserver((entries) => {
@@ -117,7 +116,6 @@ function initCounters() {
                 const target = parseFloat(entry.target.dataset.target);
                 const suffix = entry.target.dataset.suffix || '';
                 const isFloat = target % 1 !== 0;
-                const prefix = target >= 300 ? '' : '';  // No prefix needed
                 const postfix = target >= 300 ? 'M+' : suffix;
                 animateCounter(entry.target, target, postfix, isFloat);
             }
@@ -130,22 +128,19 @@ function animateCounter(el, target, suffix, isFloat) {
     const duration = 1800;
     let start = null;
     const easeOut = t => 1 - Math.pow(1 - t, 3);
-
-    const step = (ts) => {
+    const step = ts => {
         if (!start) start = ts;
-        const progress = Math.min((ts - start) / duration, 1);
-        const val = easeOut(progress) * target;
-        if (isFloat) {
-            el.textContent = val.toFixed(2) + suffix;
-        } else {
-            el.textContent = Math.floor(val) + suffix;
-        }
-        if (progress < 1) requestAnimationFrame(step);
+        const p = Math.min((ts - start) / duration, 1);
+        el.textContent = (isFloat ? (easeOut(p) * target).toFixed(2) : Math.floor(easeOut(p) * target)) + suffix;
+        if (p < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
 }
 
-// ── PHQ-8 Questions ────────────────────────────────────────────
+
+// ═══════════════════════════════════════════════════════════════════
+//  PHQ-8 DATA
+// ═══════════════════════════════════════════════════════════════════
 const PHQ_QUESTIONS = [
     "Little interest or pleasure in doing things",
     "Feeling down, depressed, or hopeless",
@@ -164,27 +159,29 @@ const PHQ_OPTIONS = [
     { key: '3', label: 'Nearly every day', value: 3 }
 ];
 
-// ── Interview Questions ────────────────────────────────────────
+
+// ═══════════════════════════════════════════════════════════════════
+//  INTERVIEW QUESTIONS — Simple, conversational, depression-focused
+// ═══════════════════════════════════════════════════════════════════
 const INTERVIEW_QUESTIONS = [
-    "Hello! I'm **Mira**, your MindScan virtual assistant. I'd like to ask you a few questions to better understand how you've been feeling. There are no right or wrong answers — just share whatever feels comfortable.\n\nLet's start: **How have you been feeling lately?**",
-    "Thank you for sharing that. **How has your sleep been recently?** Do you have trouble falling asleep, staying asleep, or do you find yourself sleeping too much?",
-    "I appreciate you telling me. **How would you describe your energy levels day to day?** Do you feel tired often?",
-    "**Have you lost interest or pleasure in activities you used to enjoy?** Things like hobbies, socializing, or work?",
-    "I understand. **How do you feel about the future?** Do you generally feel hopeful or do things seem difficult?",
-    "**Do you find it difficult to concentrate on tasks?** For example, reading, watching TV, or following conversations?",
-    "**How are your relationships with people close to you?** Do you feel connected to others or more isolated?",
-    "Thank you for being open with me. Last question: **Is there anything else that has been bothering you recently?** Anything you'd like to share?"
+    "Hey there! I'm **Mira**, your MindScan assistant. I'm just going to ask you a few casual questions — no right or wrong answers, just be yourself.\n\n**So, how are you doing today? How's life been?**",
+    "Thanks for sharing. **What do you usually do for fun?** Have you been enjoying those things lately, or not so much?",
+    "Got it. **How have you been sleeping?** Like, do you sleep well or has it been tough?",
+    "**How's your energy been?** Do you feel tired a lot, or are you generally okay?",
+    "**Can you focus on things easily?** Like work, studying, watching something — or do you zone out a lot?",
+    "**How are things with your friends and family?** Do you feel close to people, or more alone lately?",
+    "**When you think about the future**, how does it feel? Exciting, stressful, or kinda blank?",
+    "Last one — **is there anything that's been really bothering you lately?** Anything weighing on your mind?"
 ];
 
 
 // ═══════════════════════════════════════════════════════════════════
-//  NAVIGATION
+//  NAVIGATION — New flow: Landing → Setup → Interview → PHQ → Results
 // ═══════════════════════════════════════════════════════════════════
 function goTo(sectionId) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     document.getElementById(sectionId).classList.add('active');
 
-    // Nav state
     const navLinks = document.getElementById('nav-links-main');
     const navSteps = document.getElementById('nav-steps');
 
@@ -196,10 +193,11 @@ function goTo(sectionId) {
         navSteps.style.display = 'flex';
     }
 
-    // Step dots
-    const steps = ['landing', 'phq', 'interview', 'results'];
+    // Step dots — 5 steps now
+    const steps = ['landing', 'setup', 'interview', 'phq', 'results'];
     steps.forEach((s, i) => {
         const dot = document.getElementById('dot-' + s);
+        if (!dot) return;
         dot.classList.remove('active', 'done');
         const targetIdx = steps.indexOf(sectionId);
         if (i < targetIdx) dot.classList.add('done');
@@ -208,8 +206,371 @@ function goTo(sectionId) {
 
     currentSection = sectionId;
     window.scrollTo(0, 0);
-    if (sectionId === 'phq') renderPhqQuestion();
+
+    if (sectionId === 'setup') initSetupScreen();
     if (sectionId === 'interview') startInterview();
+    if (sectionId === 'phq') {
+        renderPhqQuestion();
+        showMiniWebcam();   // Keep facial analysis visible during PHQ
+    }
+    if (sectionId === 'results') {
+        hideMiniWebcam();
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  SETUP SCREEN — Camera + Mic + Voice Check
+// ═══════════════════════════════════════════════════════════════════
+function initSetupScreen() {
+    // Reset statuses
+    document.getElementById('cam-status').textContent = 'Not checked';
+    document.getElementById('cam-status').className = 'setup-status';
+    document.getElementById('mic-status').textContent = 'Not checked';
+    document.getElementById('mic-status').className = 'setup-status';
+    document.getElementById('voice-status').textContent = 'Not tested';
+    document.getElementById('voice-status').className = 'setup-status';
+}
+
+async function setupToggleCamera() {
+    const video = document.getElementById('setup-cam-video');
+    const placeholder = document.getElementById('setup-cam-placeholder');
+    const btn = document.getElementById('setup-cam-btn');
+    const status = document.getElementById('cam-status');
+
+    if (setupCamStream) {
+        setupCamStream.getTracks().forEach(t => t.stop());
+        setupCamStream = null;
+        video.style.display = 'none';
+        placeholder.style.display = 'flex';
+        btn.textContent = 'Enable Camera';
+        status.textContent = 'Not checked';
+        status.className = 'setup-status';
+    } else {
+        try {
+            placeholder.innerHTML = '<span class="icon">⏳</span><span>Starting camera...</span>';
+            setupCamStream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 320, height: 240, facingMode: 'user' }
+            });
+            video.srcObject = setupCamStream;
+            video.style.display = 'block';
+            placeholder.style.display = 'none';
+            btn.textContent = 'Disable Camera';
+            status.textContent = '✓ Working';
+            status.className = 'setup-status ok';
+        } catch (err) {
+            placeholder.innerHTML = '<span class="icon">⚠️</span><span>Camera access denied</span>';
+            status.textContent = '✗ Failed';
+            status.className = 'setup-status fail';
+        }
+    }
+}
+
+async function setupToggleMic() {
+    const canvas = document.getElementById('setup-mic-canvas');
+    const text = document.getElementById('setup-mic-text');
+    const btn = document.getElementById('setup-mic-btn');
+    const status = document.getElementById('mic-status');
+
+    if (setupMicStream) {
+        if (setupMicAnimId) cancelAnimationFrame(setupMicAnimId);
+        setupMicStream.getTracks().forEach(t => t.stop());
+        setupMicStream = null;
+        if (setupMicCtx) { setupMicCtx.close(); setupMicCtx = null; }
+        btn.textContent = 'Test Microphone';
+        text.textContent = 'Click below to test your mic';
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    } else {
+        try {
+            text.textContent = 'Listening... speak now to see the waveform';
+            setupMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            setupMicCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const source = setupMicCtx.createMediaStreamSource(setupMicStream);
+            setupMicAnalyser = setupMicCtx.createAnalyser();
+            setupMicAnalyser.fftSize = 256;
+            source.connect(setupMicAnalyser);
+            btn.textContent = 'Stop Test';
+            status.textContent = '✓ Working';
+            status.className = 'setup-status ok';
+
+            const bufferLength = setupMicAnalyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            const ctx = canvas.getContext('2d');
+
+            function drawSetupMic() {
+                setupMicAnimId = requestAnimationFrame(drawSetupMic);
+                setupMicAnalyser.getByteFrequencyData(dataArray);
+                canvas.width = canvas.offsetWidth;
+                const w = canvas.width, h = canvas.height;
+                ctx.clearRect(0, 0, w, h);
+                const barW = (w / bufferLength) * 2.5;
+                let x = 0;
+                for (let i = 0; i < bufferLength; i++) {
+                    const barH = (dataArray[i] / 255) * h;
+                    const grad = ctx.createLinearGradient(0, h, 0, h - barH);
+                    grad.addColorStop(0, '#4F8EF7');
+                    grad.addColorStop(1, '#9B6FFF');
+                    ctx.fillStyle = grad;
+                    ctx.fillRect(x, h - barH, barW - 1, barH);
+                    x += barW;
+                }
+            }
+            drawSetupMic();
+        } catch (err) {
+            text.textContent = 'Microphone access denied';
+            status.textContent = '✗ Failed';
+            status.className = 'setup-status fail';
+        }
+    }
+}
+
+function testMiraVoice() {
+    const status = document.getElementById('voice-status');
+    speakText("Hi! I'm Mira, your MindScan assistant. I'll be guiding you through a short conversation. Can you hear me clearly?", () => {
+        status.textContent = '✓ Played';
+        status.className = 'setup-status ok';
+    });
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  TEXT-TO-SPEECH — Better voice selection
+// ═══════════════════════════════════════════════════════════════════
+function speakText(text, onEndCallback) {
+    if (!('speechSynthesis' in window)) { if (onEndCallback) onEndCallback(); return; }
+    window.speechSynthesis.cancel();
+
+    const cleanText = text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n/g, '. ');
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.rate = 0.9;
+    utterance.pitch = 1.05;
+    utterance.volume = 1;
+
+    // Voice priority list — most natural sounding
+    const voices = window.speechSynthesis.getVoices();
+    const voicePriority = [
+        'Microsoft Jenny', 'Google UK English Female', 'Samantha',
+        'Microsoft Zira', 'Karen', 'Moira', 'Tessa', 'Fiona',
+        'Google US English', 'Victoria', 'Alex'
+    ];
+
+    let selectedVoice = null;
+    for (const name of voicePriority) {
+        selectedVoice = voices.find(v => v.name.includes(name));
+        if (selectedVoice) break;
+    }
+    if (!selectedVoice) selectedVoice = voices.find(v => v.lang.startsWith('en'));
+    if (selectedVoice) utterance.voice = selectedVoice;
+
+    utterance.onstart = () => {
+        isSpeaking = true;
+        const ind = document.getElementById('mira-speaking');
+        if (ind) ind.style.display = 'flex';
+    };
+    const onDone = () => {
+        isSpeaking = false;
+        const ind = document.getElementById('mira-speaking');
+        if (ind) ind.style.display = 'none';
+        if (onEndCallback) onEndCallback();
+    };
+    utterance.onend = onDone;
+    utterance.onerror = onDone;
+
+    window.speechSynthesis.speak(utterance);
+}
+
+if ('speechSynthesis' in window) {
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  SPEECH-TO-TEXT + AUDIO RECORDING + PLAYBACK
+// ═══════════════════════════════════════════════════════════════════
+function toggleMic() {
+    if (isRecording) stopRecording();
+    else startRecording();
+}
+
+function startRecording() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        alert('Speech recognition is not supported in your browser. Please use Chrome or Edge.');
+        return;
+    }
+
+    if (isSpeaking) window.speechSynthesis.cancel();
+
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognition.maxAlternatives = 3;
+
+    const input = document.getElementById('chat-input');
+    const micBtn = document.getElementById('mic-btn');
+    let finalTranscript = '';
+
+    recognition.onresult = (event) => {
+        let interimTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+                finalTranscript += event.results[i][0].transcript + ' ';
+            } else {
+                interimTranscript += event.results[i][0].transcript;
+            }
+        }
+        input.value = finalTranscript + interimTranscript;
+    };
+
+    recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        if (event.error !== 'no-speech') stopRecording();
+    };
+
+    recognition.onend = () => {
+        // Don't auto-send — let user review and press send
+        if (isRecording) {
+            isRecording = false;
+            const micBtn = document.getElementById('mic-btn');
+            micBtn.classList.remove('recording');
+            micBtn.innerHTML = '🎤';
+            stopAudioVisualizer();
+            stopMediaRecorder();
+            if (recTimerInterval) { clearInterval(recTimerInterval); recTimerInterval = null; }
+        }
+    };
+
+    recognition.start();
+    isRecording = true;
+    micBtn.classList.add('recording');
+    micBtn.innerHTML = '⏹';
+
+    // Start audio visualizer + media recorder for playback
+    startAudioVisualizer();
+    startMediaRecorder();
+
+    // Timer
+    recSeconds = 0;
+    const timerEl = document.getElementById('rec-timer');
+    recTimerInterval = setInterval(() => {
+        recSeconds++;
+        timerEl.textContent = `${String(Math.floor(recSeconds / 60)).padStart(2, '0')}:${String(recSeconds % 60).padStart(2, '0')}`;
+    }, 1000);
+}
+
+function stopRecording() {
+    if (recognition) {
+        isRecording = false;
+        recognition.stop();
+        recognition = null;
+    }
+    const micBtn = document.getElementById('mic-btn');
+    micBtn.classList.remove('recording');
+    micBtn.innerHTML = '🎤';
+    stopAudioVisualizer();
+    stopMediaRecorder();
+    if (recTimerInterval) { clearInterval(recTimerInterval); recTimerInterval = null; }
+}
+
+// ── Media Recorder (for playback) ────────────────────────────────
+async function startMediaRecorder() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        mediaRecorder.ondataavailable = e => {
+            if (e.data.size > 0) recordedChunks.push(e.data);
+        };
+        mediaRecorder.onstop = () => {
+            if (recordedChunks.length > 0) {
+                lastRecordingBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+                if (lastRecordingUrl) URL.revokeObjectURL(lastRecordingUrl);
+                lastRecordingUrl = URL.createObjectURL(lastRecordingBlob);
+                // Show playback button
+                const playBtn = document.getElementById('playback-btn');
+                if (playBtn) playBtn.style.display = 'flex';
+            }
+            stream.getTracks().forEach(t => t.stop());
+        };
+        mediaRecorder.start();
+    } catch (err) {
+        console.error('MediaRecorder error:', err);
+    }
+}
+
+function stopMediaRecorder() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+    }
+}
+
+function playbackRecording() {
+    if (!lastRecordingUrl) return;
+    const audio = new Audio(lastRecordingUrl);
+    const btn = document.getElementById('playback-btn');
+    btn.innerHTML = '⏹';
+    btn.classList.add('playing');
+    audio.play();
+    audio.onended = () => {
+        btn.innerHTML = '🔊';
+        btn.classList.remove('playing');
+    };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  AUDIO WAVEFORM VISUALIZER
+// ═══════════════════════════════════════════════════════════════════
+async function startAudioVisualizer() {
+    const visualizer = document.getElementById('audio-visualizer');
+    const canvas = document.getElementById('audio-canvas');
+    if (!visualizer || !canvas) return;
+    visualizer.style.display = 'flex';
+
+    try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(micStream);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        const ctx = canvas.getContext('2d');
+
+        function draw() {
+            waveformAnimId = requestAnimationFrame(draw);
+            analyser.getByteFrequencyData(dataArray);
+            canvas.width = canvas.offsetWidth;
+            const w = canvas.width, h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+            const barW = (w / bufferLength) * 2;
+            let x = 0;
+            for (let i = 0; i < bufferLength; i++) {
+                const barH = (dataArray[i] / 255) * h;
+                const grad = ctx.createLinearGradient(0, h, 0, h - barH);
+                grad.addColorStop(0, '#4F8EF7');
+                grad.addColorStop(1, '#9B6FFF');
+                ctx.fillStyle = grad;
+                ctx.fillRect(x, h - barH, barW - 1, barH);
+                x += barW;
+            }
+        }
+        draw();
+    } catch (err) {
+        console.error('Audio visualizer error:', err);
+    }
+}
+
+function stopAudioVisualizer() {
+    if (waveformAnimId) { cancelAnimationFrame(waveformAnimId); waveformAnimId = null; }
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    if (audioContext) { audioContext.close(); audioContext = null; }
+    const vis = document.getElementById('audio-visualizer');
+    if (vis) vis.style.display = 'none';
 }
 
 
@@ -231,50 +592,101 @@ function renderPhqQuestion() {
       `).join('')}
     </div>`;
 
-    const pct = ((phqIndex + 1) / 8) * 100;
-    document.getElementById('phq-progress').style.width = pct + '%';
+    document.getElementById('phq-progress').style.width = ((phqIndex + 1) / 8 * 100) + '%';
     document.getElementById('phq-progress-label').textContent = `${phqIndex + 1} / 8`;
     document.getElementById('phq-back-btn').disabled = phqIndex === 0;
     updatePhqNextBtn();
 }
 
-function selectPhqOption(value) {
-    phqAnswers[phqIndex] = value;
-    renderPhqQuestion();
-}
+function selectPhqOption(value) { phqAnswers[phqIndex] = value; renderPhqQuestion(); }
 
 function updatePhqNextBtn() {
     const btn = document.getElementById('phq-next-btn');
     btn.disabled = phqAnswers[phqIndex] < 0;
-    btn.textContent = phqIndex === 7 ? 'Continue to Interview →' : 'Next →';
+    btn.textContent = phqIndex === 7 ? 'Get My Results →' : 'Next →';
 }
 
 function phqNext() {
     if (phqAnswers[phqIndex] < 0) return;
     if (phqIndex < 7) { phqIndex++; renderPhqQuestion(); }
-    else goTo('interview');
+    else submitForAnalysis();  // Last PHQ question → submit everything
 }
 
-function phqBack() {
-    if (phqIndex > 0) { phqIndex--; renderPhqQuestion(); }
-}
+function phqBack() { if (phqIndex > 0) { phqIndex--; renderPhqQuestion(); } }
 
 
 // ═══════════════════════════════════════════════════════════════════
-//  VIRTUAL ASSISTANT INTERVIEW
+//  VIRTUAL INTERVIEW
 // ═══════════════════════════════════════════════════════════════════
 function startInterview() {
     interviewIndex = 0;
     interviewResponses = [];
     document.getElementById('chat-messages').innerHTML = '';
+    document.getElementById('chat-input').disabled = false;
+    document.getElementById('send-btn').disabled = false;
+    const playBtn = document.getElementById('playback-btn');
+    if (playBtn) playBtn.style.display = 'none';
+
+    // Transfer camera from setup to interview
+    transferCameraToInterview();
     renderInterviewProgress();
     setTimeout(() => askQuestion(0), 600);
 }
 
+function transferCameraToInterview() {
+    const video = document.getElementById('webcam-video');
+    const placeholder = document.getElementById('webcam-placeholder');
+
+    if (setupCamStream) {
+        // Use the camera stream from setup
+        webcamStream = setupCamStream;
+        setupCamStream = null;
+        video.srcObject = webcamStream;
+        video.style.display = 'block';
+        placeholder.style.display = 'none';
+
+        // Load face models and start detection
+        initFaceAnalysis();
+    } else {
+        // Auto-request camera if user didn't enable it in setup
+        autoStartCamera();
+    }
+}
+
+async function autoStartCamera() {
+    const video = document.getElementById('webcam-video');
+    const placeholder = document.getElementById('webcam-placeholder');
+    try {
+        placeholder.style.display = 'flex';
+        placeholder.innerHTML = '<span class="icon">⏳</span><span>Starting camera...</span>';
+        webcamStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 320, height: 240, facingMode: 'user' }
+        });
+        video.srcObject = webcamStream;
+        video.style.display = 'block';
+        placeholder.style.display = 'none';
+        initFaceAnalysis();
+    } catch (err) {
+        console.warn('Camera auto-start failed:', err);
+        placeholder.innerHTML = '<span class="icon">📷</span><span>Camera not available</span>';
+    }
+}
+
+function initFaceAnalysis() {
+    if (typeof faceapi !== 'undefined') {
+        const liveExpr = document.getElementById('expression-live');
+        liveExpr.style.display = 'block';
+        document.getElementById('live-expression').textContent = 'Loading models...';
+        loadFaceModels().then(() => {
+            if (faceModelsLoaded) startFaceDetection();
+        });
+    }
+}
+
 function renderInterviewProgress() {
     const list = document.getElementById('q-progress-list');
-    const labels = ['General wellbeing', 'Sleep patterns', 'Energy levels',
-        'Interest & pleasure', 'Future outlook', 'Concentration', 'Relationships', 'Other concerns'];
+    const labels = ['General wellbeing', 'Interests & hobbies', 'Sleep quality', 'Energy levels',
+        'Focus & concentration', 'Social connection', 'Future outlook', 'Worries & concerns'];
     list.innerHTML = labels.map((label, i) => {
         let cls = i < interviewIndex ? 'done' : i === interviewIndex ? 'current' : '';
         return `<div class="q-progress-item ${cls}">
@@ -294,208 +706,9 @@ function askQuestion(idx) {
     setTimeout(() => {
         typingDiv.remove();
         addMessage('assistant', INTERVIEW_QUESTIONS[idx]);
-        // Speak the question aloud via TTS
         speakText(INTERVIEW_QUESTIONS[idx]);
         document.getElementById('chat-input').focus();
     }, 1200);
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  TEXT-TO-SPEECH (Mira speaks)
-// ═══════════════════════════════════════════════════════════════════
-function speakText(text) {
-    if (!('speechSynthesis' in window)) return;
-    // Cancel any ongoing speech
-    window.speechSynthesis.cancel();
-    // Strip markdown formatting
-    const cleanText = text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n/g, '. ');
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.rate = 0.95;
-    utterance.pitch = 1.1;
-    utterance.volume = 1;
-
-    // Try to pick a female English voice
-    const voices = window.speechSynthesis.getVoices();
-    const femaleVoice = voices.find(v =>
-        v.lang.startsWith('en') && (v.name.includes('Female') || v.name.includes('Zira') ||
-            v.name.includes('Samantha') || v.name.includes('Google UK English Female') ||
-            v.name.includes('Microsoft Zira'))
-    ) || voices.find(v => v.lang.startsWith('en'));
-    if (femaleVoice) utterance.voice = femaleVoice;
-
-    // Show speaking indicator
-    utterance.onstart = () => {
-        isSpeaking = true;
-        const indicator = document.getElementById('mira-speaking');
-        if (indicator) indicator.style.display = 'flex';
-    };
-    utterance.onend = () => {
-        isSpeaking = false;
-        const indicator = document.getElementById('mira-speaking');
-        if (indicator) indicator.style.display = 'none';
-    };
-    utterance.onerror = () => {
-        isSpeaking = false;
-        const indicator = document.getElementById('mira-speaking');
-        if (indicator) indicator.style.display = 'none';
-    };
-
-    window.speechSynthesis.speak(utterance);
-}
-
-// Load voices (some browsers load them asynchronously)
-if ('speechSynthesis' in window) {
-    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  SPEECH-TO-TEXT (User speaks)
-// ═══════════════════════════════════════════════════════════════════
-function toggleMic() {
-    if (isRecording) {
-        stopRecording();
-    } else {
-        startRecording();
-    }
-}
-
-function startRecording() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-        alert('Speech recognition is not supported in your browser. Please use Chrome or Edge.');
-        return;
-    }
-
-    // Stop Mira from speaking if she is
-    if (isSpeaking) window.speechSynthesis.cancel();
-
-    recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
-    const input = document.getElementById('chat-input');
-    const micBtn = document.getElementById('mic-btn');
-    let finalTranscript = '';
-
-    recognition.onresult = (event) => {
-        let interimTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-            if (event.results[i].isFinal) {
-                finalTranscript += event.results[i][0].transcript + ' ';
-            } else {
-                interimTranscript += event.results[i][0].transcript;
-            }
-        }
-        input.value = finalTranscript + interimTranscript;
-    };
-
-    recognition.onerror = (event) => {
-        console.error('Speech recognition error:', event.error);
-        stopRecording();
-    };
-
-    recognition.onend = () => {
-        // If still recording (not manually stopped), auto-send
-        if (isRecording) {
-            stopRecording();
-            if (input.value.trim()) {
-                sendMessage();
-            }
-        }
-    };
-
-    recognition.start();
-    isRecording = true;
-    micBtn.classList.add('recording');
-    micBtn.innerHTML = '⏹';
-
-    // Start audio visualizer
-    startAudioVisualizer();
-
-    // Start REC timer
-    recSeconds = 0;
-    const timerEl = document.getElementById('rec-timer');
-    recTimerInterval = setInterval(() => {
-        recSeconds++;
-        const mins = Math.floor(recSeconds / 60).toString().padStart(2, '0');
-        const secs = (recSeconds % 60).toString().padStart(2, '0');
-        timerEl.textContent = `${mins}:${secs}`;
-    }, 1000);
-}
-
-function stopRecording() {
-    if (recognition) {
-        isRecording = false;
-        recognition.stop();
-        recognition = null;
-    }
-
-    const micBtn = document.getElementById('mic-btn');
-    micBtn.classList.remove('recording');
-    micBtn.innerHTML = '🎤';
-
-    // Stop visualizer
-    stopAudioVisualizer();
-
-    // Stop timer
-    if (recTimerInterval) { clearInterval(recTimerInterval); recTimerInterval = null; }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  AUDIO WAVEFORM VISUALIZER
-// ═══════════════════════════════════════════════════════════════════
-async function startAudioVisualizer() {
-    const visualizer = document.getElementById('audio-visualizer');
-    const canvas = document.getElementById('audio-canvas');
-    visualizer.style.display = 'flex';
-
-    try {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const source = audioContext.createMediaStreamSource(micStream);
-        analyser = audioContext.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
-
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        const ctx = canvas.getContext('2d');
-
-        function drawWaveform() {
-            waveformAnimId = requestAnimationFrame(drawWaveform);
-            analyser.getByteFrequencyData(dataArray);
-
-            canvas.width = canvas.offsetWidth;
-            const width = canvas.width;
-            const height = canvas.height;
-            ctx.clearRect(0, 0, width, height);
-
-            const barWidth = (width / bufferLength) * 2;
-            let x = 0;
-
-            for (let i = 0; i < bufferLength; i++) {
-                const barHeight = (dataArray[i] / 255) * height;
-                const gradient = ctx.createLinearGradient(0, height, 0, height - barHeight);
-                gradient.addColorStop(0, '#4F8EF7');
-                gradient.addColorStop(1, '#9B6FFF');
-                ctx.fillStyle = gradient;
-                ctx.fillRect(x, height - barHeight, barWidth - 1, barHeight);
-                x += barWidth;
-            }
-        }
-        drawWaveform();
-    } catch (err) {
-        console.error('Audio visualizer error:', err);
-    }
-}
-
-function stopAudioVisualizer() {
-    if (waveformAnimId) { cancelAnimationFrame(waveformAnimId); waveformAnimId = null; }
-    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-    if (audioContext) { audioContext.close(); audioContext = null; }
-    const visualizer = document.getElementById('audio-visualizer');
-    if (visualizer) visualizer.style.display = 'none';
 }
 
 function addMessage(role, text) {
@@ -514,6 +727,9 @@ function sendMessage() {
     addMessage('user', text);
     interviewResponses.push(text);
     input.value = '';
+    // Hide playback button after sending
+    const playBtn = document.getElementById('playback-btn');
+    if (playBtn) playBtn.style.display = 'none';
     interviewIndex++;
     renderInterviewProgress();
     setTimeout(() => askQuestion(interviewIndex), 500);
@@ -530,12 +746,14 @@ function finishInterview() {
     setTimeout(() => {
         typingDiv.remove();
         addMessage('assistant',
-            "Thank you so much for sharing all of that with me. I really appreciate your openness. " +
-            "Let me analyze your responses now. Please wait a moment...");
+            "Thank you so much for chatting with me! I really appreciate you being so open. " +
+            "Now we just have a quick questionnaire — 8 short questions. Almost done!");
+        speakText("Thank you so much for chatting with me! Now let's do a quick questionnaire.");
         document.getElementById('chat-input').disabled = true;
         document.getElementById('send-btn').disabled = true;
-        stopFaceDetection();
-        setTimeout(() => submitForAnalysis(), 2000);
+        // NOTE: Do NOT stop face detection here — let it sustain through PHQ-8
+        // Go to PHQ after a pause
+        setTimeout(() => goTo('phq'), 4000);
     }, 1500);
 }
 
@@ -556,47 +774,6 @@ async function loadFaceModels() {
     }
 }
 
-async function toggleWebcam() {
-    const video = document.getElementById('webcam-video');
-    const placeholder = document.getElementById('webcam-placeholder');
-    const btn = document.getElementById('webcam-toggle');
-    const overlay = document.getElementById('webcam-overlay');
-    const liveExpr = document.getElementById('expression-live');
-
-    if (webcamStream) {
-        stopFaceDetection();
-        webcamStream.getTracks().forEach(t => t.stop());
-        webcamStream = null;
-        video.style.display = 'none';
-        overlay.style.display = 'none';
-        liveExpr.style.display = 'none';
-        placeholder.style.display = 'flex';
-        placeholder.innerHTML = '<span class="icon">📷</span><span>Camera not active</span>';
-        btn.textContent = 'Enable Camera';
-    } else {
-        try {
-            placeholder.innerHTML = '<span class="icon">⏳</span><span>Starting camera...</span>';
-            webcamStream = await navigator.mediaDevices.getUserMedia({
-                video: { width: 320, height: 240, facingMode: 'user' }
-            });
-            video.srcObject = webcamStream;
-            video.style.display = 'block';
-            placeholder.style.display = 'none';
-            btn.textContent = 'Disable Camera';
-
-            if (typeof faceapi !== 'undefined') {
-                liveExpr.style.display = 'block';
-                document.getElementById('live-expression').textContent = 'Loading models...';
-                await loadFaceModels();
-                if (faceModelsLoaded) startFaceDetection();
-            }
-        } catch (err) {
-            console.error('Webcam error:', err);
-            placeholder.innerHTML = '<span class="icon">⚠️</span><span>Camera access denied</span>';
-        }
-    }
-}
-
 function startFaceDetection() {
     if (faceDetectionInterval) return;
     faceDetectionInterval = setInterval(async () => {
@@ -607,7 +784,6 @@ function startFaceDetection() {
             const detection = await faceapi
                 .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.4 }))
                 .withFaceExpressions();
-
             if (detection) {
                 faceDetectedCount++;
                 const expr = detection.expressions;
@@ -618,10 +794,7 @@ function startFaceDetection() {
                 });
                 const sorted = Object.entries(expr).sort((a, b) => b[1] - a[1]);
                 const dominant = sorted[0];
-                const emojiMap = {
-                    neutral: '😐', happy: '😊', sad: '😢', angry: '😠',
-                    fearful: '😨', disgusted: '🤢', surprised: '😲'
-                };
+                const emojiMap = { neutral: '😐', happy: '😊', sad: '😢', angry: '😠', fearful: '😨', disgusted: '🤢', surprised: '😲' };
                 document.getElementById('live-expression').textContent =
                     `${emojiMap[dominant[0]] || ''} ${dominant[0]} (${(dominant[1] * 100).toFixed(0)}%)`;
                 drawFaceOverlay(detection);
@@ -649,6 +822,50 @@ function stopFaceDetection() {
     if (faceDetectionInterval) { clearInterval(faceDetectionInterval); faceDetectionInterval = null; }
 }
 
+// ── Mini-webcam PiP during PHQ-8 ─────────────────────────────────
+function showMiniWebcam() {
+    // Only show if we have an active webcam stream
+    if (!webcamStream) return;
+    let mini = document.getElementById('mini-webcam');
+    if (!mini) {
+        mini = document.createElement('div');
+        mini.id = 'mini-webcam';
+        mini.className = 'mini-webcam-pip';
+        mini.innerHTML = `
+            <video id="mini-webcam-video" autoplay playsinline muted></video>
+            <div class="mini-webcam-label" id="mini-webcam-label">
+                <span class="mini-rec-dot"></span>
+                <span id="mini-expression-text">Analyzing...</span>
+            </div>
+        `;
+        document.body.appendChild(mini);
+    }
+    const miniVideo = document.getElementById('mini-webcam-video');
+    miniVideo.srcObject = webcamStream;
+    mini.style.display = 'block';
+    // Update mini expression text from the main detection loop
+    if (!mini._updateInterval) {
+        mini._updateInterval = setInterval(() => {
+            const mainExpr = document.getElementById('live-expression');
+            const miniExpr = document.getElementById('mini-expression-text');
+            if (mainExpr && miniExpr) {
+                miniExpr.textContent = mainExpr.textContent;
+            }
+        }, 3000);
+    }
+}
+
+function hideMiniWebcam() {
+    const mini = document.getElementById('mini-webcam');
+    if (mini) {
+        if (mini._updateInterval) {
+            clearInterval(mini._updateInterval);
+            mini._updateInterval = null;
+        }
+        mini.style.display = 'none';
+    }
+}
+
 function computeVisualAnalysis() {
     if (expressionHistory.length === 0) return null;
     const avg = { neutral: 0, happy: 0, sad: 0, angry: 0, fearful: 0, disgusted: 0, surprised: 0 };
@@ -657,18 +874,12 @@ function computeVisualAnalysis() {
     }
     const n = expressionHistory.length;
     for (const key of Object.keys(avg)) avg[key] /= n;
-
     const flatAffect = avg.neutral;
     const sadScore = avg.sad + avg.fearful * 0.5;
     const happyScore = avg.happy;
     let visualProb = (flatAffect * 0.4 + sadScore * 0.4 + (1 - happyScore) * 0.2);
     visualProb = Math.max(0, Math.min(1, visualProb));
-
-    return {
-        averages: avg, flatAffect, visualProb,
-        samplesCollected: n,
-        faceDetectionRate: totalDetectionAttempts > 0 ? faceDetectedCount / totalDetectionAttempts : 0,
-    };
+    return { averages: avg, flatAffect, visualProb, samplesCollected: n, faceDetectionRate: totalDetectionAttempts > 0 ? faceDetectedCount / totalDetectionAttempts : 0 };
 }
 
 
@@ -677,8 +888,19 @@ function computeVisualAnalysis() {
 // ═══════════════════════════════════════════════════════════════════
 async function submitForAnalysis() {
     showLoading('Analyzing your responses with AI models...');
+
+    // Stop face detection NOW — we've collected enough data
+    stopFaceDetection();
+    hideMiniWebcam();
+
     const interviewText = interviewResponses.join(' ');
     const visualData = computeVisualAnalysis();
+
+    // Stop webcam stream
+    if (webcamStream) {
+        webcamStream.getTracks().forEach(t => t.stop());
+        webcamStream = null;
+    }
 
     try {
         const response = await fetch('/api/predict', {
@@ -693,38 +915,27 @@ async function submitForAnalysis() {
     } catch (err) {
         hideLoading();
         console.error('Prediction error:', err);
-        addMessage('assistant', '❌ Sorry, there was an error analyzing your responses. Please try again.');
-        document.getElementById('chat-input').disabled = false;
-        document.getElementById('send-btn').disabled = false;
+        alert('Error analyzing responses. Please try again.');
     }
 }
 
 function renderResults(data, visualData) {
-    // ── Risk Gauge ─────────────────────────────────────────
     const prob = data.combined.probability;
     const pct = Math.round(prob * 100);
     const circumference = 2 * Math.PI * 52;
     const offset = circumference * (1 - prob);
-
     const gaugeFill = document.getElementById('gauge-fill');
-    let strokeColor;
-    if (prob >= 0.6) strokeColor = '#EF4444';
-    else if (prob >= 0.4) strokeColor = '#F59E0B';
-    else strokeColor = '#10B981';
-
+    let strokeColor = prob >= 0.6 ? '#EF4444' : prob >= 0.4 ? '#F59E0B' : '#10B981';
     gaugeFill.style.stroke = strokeColor;
     setTimeout(() => { gaugeFill.style.strokeDashoffset = offset; }, 300);
-
     document.getElementById('gauge-value').textContent = pct + '%';
     const riskLabel = document.getElementById('risk-label');
     riskLabel.textContent = data.combined.riskLevel + ' Risk';
     riskLabel.style.color = strokeColor;
 
-    // ── PHQ-8 Card ─────────────────────────────────────────
     const phqScore = data.phq.score;
     document.getElementById('phq-score-val').textContent = `${phqScore} / 24`;
     document.getElementById('phq-score-bar').style.width = (phqScore / 24 * 100) + '%';
-
     const phqBadge = document.getElementById('phq-badge');
     phqBadge.textContent = data.phq.severity;
     phqBadge.className = 'result-badge ' + (phqScore >= 10 ? 'high' : phqScore >= 5 ? 'moderate' : 'low');
@@ -738,20 +949,15 @@ function renderResults(data, visualData) {
     };
     document.getElementById('phq-severity-text').textContent = sevDesc[data.phq.severity] || '';
 
-    // ── Text Analysis Card ─────────────────────────────────
     const textProb = data.text.probability;
     const textPct = Math.round(textProb * 100);
     document.getElementById('text-prob-val').textContent = textPct + '%';
     document.getElementById('text-prob-bar').style.width = textPct + '%';
-
     const textBadge = document.getElementById('text-badge');
     if (textProb >= 0.6) { textBadge.textContent = 'Elevated'; textBadge.className = 'result-badge high'; }
     else if (textProb >= 0.4) { textBadge.textContent = 'Moderate'; textBadge.className = 'result-badge moderate'; }
     else { textBadge.textContent = 'Normal'; textBadge.className = 'result-badge low'; }
-
     fetchSentiment();
-
-    // ── Visual Analysis Card ───────────────────────────────
     renderVisualResults(visualData);
 }
 
@@ -761,58 +967,33 @@ function renderVisualResults(visualData) {
     const flatVal = document.getElementById('visual-flat-val');
     const chart = document.getElementById('expression-chart');
     const note = document.getElementById('visual-note');
-
     if (!visualData || visualData.samplesCollected === 0) {
-        badge.textContent = 'No Data';
-        badge.className = 'result-badge moderate';
+        badge.textContent = 'No Data'; badge.className = 'result-badge moderate';
         flatVal.textContent = 'N/A';
-        chart.innerHTML = '<p style="font-size:0.85rem; color:var(--text-4)">Camera was not enabled during the interview. Enable the camera next time for facial expression analysis.</p>';
-        note.textContent = '';
-        return;
+        chart.innerHTML = '<p style="font-size:0.85rem; color:var(--text-4)">Camera was not enabled. Enable it in setup next time.</p>';
+        note.textContent = ''; return;
     }
-
     const flatPct = Math.round(visualData.flatAffect * 100);
     flatVal.textContent = flatPct + '%';
     flatBar.style.width = flatPct + '%';
-
     const vp = visualData.visualProb;
     if (vp >= 0.6) { badge.textContent = 'Elevated'; badge.className = 'result-badge high'; }
     else if (vp >= 0.4) { badge.textContent = 'Moderate'; badge.className = 'result-badge moderate'; }
     else { badge.textContent = 'Normal'; badge.className = 'result-badge low'; }
 
-    const emojiMap = {
-        neutral: '😐', happy: '😊', sad: '😢', angry: '😠',
-        fearful: '😨', disgusted: '🤢', surprised: '😲'
-    };
-    const colorMap = {
-        neutral: '#7B8BA0', happy: '#10B981', sad: '#4F8EF7',
-        angry: '#EF4444', fearful: '#F59E0B', disgusted: '#9B6FFF', surprised: '#06d6a0'
-    };
-
-    const avg = visualData.averages;
-    chart.innerHTML = Object.entries(avg)
-        .sort((a, b) => b[1] - a[1])
-        .map(([name, value]) => `
-      <div class="expression-row">
-        <span class="expression-emoji">${emojiMap[name]}</span>
-        <span class="expression-name">${name.charAt(0).toUpperCase() + name.slice(1)}</span>
-        <div class="expression-track">
-          <div class="expression-bar" style="width:${value * 100}%; background:${colorMap[name]}"></div>
-        </div>
-        <span class="expression-pct">${(value * 100).toFixed(0)}%</span>
-      </div>`
-        ).join('');
-
-    note.textContent = `Based on ${visualData.samplesCollected} facial snapshots captured during the interview (${Math.round(visualData.faceDetectionRate * 100)}% face detection rate).`;
+    const emojiMap = { neutral: '😐', happy: '😊', sad: '😢', angry: '😠', fearful: '😨', disgusted: '🤢', surprised: '😲' };
+    const colorMap = { neutral: '#7B8BA0', happy: '#10B981', sad: '#4F8EF7', angry: '#EF4444', fearful: '#F59E0B', disgusted: '#9B6FFF', surprised: '#06d6a0' };
+    chart.innerHTML = Object.entries(visualData.averages).sort((a, b) => b[1] - a[1]).map(([name, value]) =>
+        `<div class="expression-row"><span class="expression-emoji">${emojiMap[name]}</span><span class="expression-name">${name.charAt(0).toUpperCase() + name.slice(1)}</span><div class="expression-track"><div class="expression-bar" style="width:${value * 100}%; background:${colorMap[name]}"></div></div><span class="expression-pct">${(value * 100).toFixed(0)}%</span></div>`
+    ).join('');
+    note.textContent = `Based on ${visualData.samplesCollected} snapshots (${Math.round(visualData.faceDetectionRate * 100)}% detection rate).`;
 }
 
 async function fetchSentiment() {
-    const text = interviewResponses.join(' ');
     try {
         const res = await fetch('/api/analyze-text', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text })
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: interviewResponses.join(' ') })
         });
         const data = await res.json();
         if (data.sentiment) renderSentiment(data.sentiment);
@@ -826,14 +1007,9 @@ function renderSentiment(sentiment) {
         { label: 'Neutral', value: sentiment.neu, color: '#7B8BA0' },
         { label: 'Positive', value: sentiment.pos, color: '#10B981' },
     ];
-    container.innerHTML = items.map(item => `
-    <div class="sentiment-row">
-      <span class="sentiment-label">${item.label}</span>
-      <div class="sentiment-track">
-        <div class="sentiment-fill" style="width:${item.value * 100}%; background:${item.color}"></div>
-      </div>
-      <span class="sentiment-value">${(item.value * 100).toFixed(0)}%</span>
-    </div>`).join('');
+    container.innerHTML = items.map(item =>
+        `<div class="sentiment-row"><span class="sentiment-label">${item.label}</span><div class="sentiment-track"><div class="sentiment-fill" style="width:${item.value * 100}%; background:${item.color}"></div></div><span class="sentiment-value">${(item.value * 100).toFixed(0)}%</span></div>`
+    ).join('');
 }
 
 
@@ -844,7 +1020,6 @@ function showLoading(text) {
     document.getElementById('loading-text').textContent = text || 'Loading...';
     document.getElementById('loading').style.display = 'flex';
 }
-
 function hideLoading() {
     document.getElementById('loading').style.display = 'none';
 }
@@ -857,23 +1032,22 @@ function restart() {
     expressionHistory = [];
     faceDetectedCount = 0;
     totalDetectionAttempts = 0;
+    lastRecordingBlob = null;
+    if (lastRecordingUrl) { URL.revokeObjectURL(lastRecordingUrl); lastRecordingUrl = null; }
     document.getElementById('chat-input').disabled = false;
     document.getElementById('send-btn').disabled = false;
     stopFaceDetection();
+    hideMiniWebcam();
     stopRecording();
     stopAudioVisualizer();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-    if (webcamStream) {
-        webcamStream.getTracks().forEach(t => t.stop());
-        webcamStream = null;
-    }
+    if (webcamStream) { webcamStream.getTracks().forEach(t => t.stop()); webcamStream = null; }
+    if (setupCamStream) { setupCamStream.getTracks().forEach(t => t.stop()); setupCamStream = null; }
     goTo('landing');
-    // Restore main nav
     document.getElementById('nav-links-main').style.display = 'flex';
     document.getElementById('nav-steps').style.display = 'none';
 }
 
-// Keyboard shortcut: 0-3 for PHQ answers, Enter for next
 document.addEventListener('keydown', (e) => {
     if (currentSection === 'phq' && ['0', '1', '2', '3'].includes(e.key)) {
         selectPhqOption(parseInt(e.key));
