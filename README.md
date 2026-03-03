@@ -117,7 +117,7 @@ python app.py
 
 ## 🌐 Web Application
 
-The MindScan web app provides a complete screening experience:
+The Sentira web app provides a complete screening experience:
 
 ### User Flow
 

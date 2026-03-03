@@ -1,5 +1,5 @@
 // ================================================================
-//  MindScan — Frontend Application Logic
+//  Sentira — Frontend Application Logic
 //  Flow: Landing → Setup → Interview → PHQ-8 → Results
 //  Features: TTS, STT, Audio Recording + Playback, Face Detection
 // ================================================================
@@ -164,7 +164,7 @@ const PHQ_OPTIONS = [
 //  INTERVIEW QUESTIONS — Simple, conversational, depression-focused
 // ═══════════════════════════════════════════════════════════════════
 const INTERVIEW_QUESTIONS = [
-    "Hey there! I'm **Mira**, your MindScan assistant. I'm just going to ask you a few casual questions — no right or wrong answers, just be yourself.\n\n**So, how are you doing today? How's life been?**",
+    "Hey there! I'm **Mira**, your Sentira assistant. I'm just going to ask you a few casual questions — no right or wrong answers, just be yourself.\n\n**So, how are you doing today? How's life been?**",
     "Thanks for sharing. **What do you usually do for fun?** Have you been enjoying those things lately, or not so much?",
     "Got it. **How have you been sleeping?** Like, do you sleep well or has it been tough?",
     "**How's your energy been?** Do you feel tired a lot, or are you generally okay?",
@@ -327,7 +327,7 @@ async function setupToggleMic() {
 
 function testMiraVoice() {
     const status = document.getElementById('voice-status');
-    speakText("Hi! I'm Mira, your MindScan assistant. I'll be guiding you through a short conversation. Can you hear me clearly?", () => {
+    speakText("Hi! I'm Mira, your Sentira assistant. I'll be guiding you through a short conversation. Can you hear me clearly?", () => {
         status.textContent = '✓ Played';
         status.className = 'setup-status ok';
     });
