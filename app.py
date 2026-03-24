@@ -163,10 +163,35 @@ def predict():
             'flatAffect':  round(visual_data.get('flatAffect', 0), 4),
             'samples':     visual_data['samplesCollected'],
         }
-        # 3-way fusion: PHQ 35%, Text 35%, Visual 30%
+
+    # Include audio analysis if available
+    audio_data = data.get('audioData', None)
+    audio_prob = None
+    if audio_data and audio_data.get('samplesCollected', 0) >= 3:
+        audio_prob = audio_data.get('audioProb', 0.5)
+        results['audio'] = {
+            'probability':      round(audio_prob, 4),
+            'avgEnergy':        round(audio_data.get('avgEnergy', 0), 4),
+            'pauseRatio':       round(audio_data.get('pauseRatio', 0), 4),
+            'speechRate':       round(audio_data.get('speechRate', 0), 4),
+            'samples':          audio_data['samplesCollected'],
+        }
+
+    # Adaptive fusion based on available modalities
+    has_visual = visual_prob is not None
+    has_audio  = audio_prob is not None
+
+    if has_visual and has_audio:
+        # 4-way fusion
+        combined_prob = 0.25 * phq_norm + 0.25 * text_prob + 0.25 * audio_prob + 0.25 * visual_prob
+    elif has_visual:
+        # 3-way: PHQ + Text + Visual
         combined_prob = 0.35 * phq_norm + 0.35 * text_prob + 0.30 * visual_prob
+    elif has_audio:
+        # 3-way: PHQ + Text + Audio
+        combined_prob = 0.35 * phq_norm + 0.35 * text_prob + 0.30 * audio_prob
     else:
-        # No visual → 50/50 PHQ + Text
+        # 2-way: PHQ + Text only
         combined_prob = 0.5 * phq_norm + 0.5 * text_prob
 
     if combined_prob >= 0.6:

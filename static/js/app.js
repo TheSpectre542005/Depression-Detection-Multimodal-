@@ -30,6 +30,15 @@ let waveformAnimId = null;
 let recTimerInterval = null;
 let recSeconds = 0;
 
+// Audio feature analysis state
+let audioFeatureHistory = [];
+let audioSilenceMs = 0;
+let audioSpeechMs = 0;
+let audioSpeechSegments = 0;
+let audioLastWasSilent = true;
+let audioLastSampleTime = 0;
+let audioCollectIntervalId = null;
+
 // Audio recording + playback
 let mediaRecorder = null;
 let recordedChunks = [];
@@ -541,6 +550,13 @@ async function startAudioVisualizer() {
         const dataArray = new Uint8Array(bufferLength);
         const ctx = canvas.getContext('2d');
 
+        // Start audio feature collection (every 500ms)
+        audioLastSampleTime = Date.now();
+        if (audioCollectIntervalId) clearInterval(audioCollectIntervalId);
+        audioCollectIntervalId = setInterval(() => {
+            collectAudioFeatures(dataArray, bufferLength);
+        }, 500);
+
         function draw() {
             waveformAnimId = requestAnimationFrame(draw);
             analyser.getByteFrequencyData(dataArray);
@@ -565,8 +581,119 @@ async function startAudioVisualizer() {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  AUDIO FEATURE EXTRACTION — Real-time voice cue analysis
+// ═══════════════════════════════════════════════════════════════════
+function collectAudioFeatures(dataArray, bufferLength) {
+    if (!analyser) return;
+    analyser.getByteFrequencyData(dataArray);
+
+    const now = Date.now();
+    const dt = now - audioLastSampleTime;
+    audioLastSampleTime = now;
+
+    // RMS Energy
+    let sumSq = 0;
+    for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 255;
+        sumSq += v * v;
+    }
+    const rms = Math.sqrt(sumSq / bufferLength);
+
+    // Spectral centroid (weighted mean of frequency bins)
+    let weightedSum = 0, totalWeight = 0;
+    for (let i = 0; i < bufferLength; i++) {
+        weightedSum += i * dataArray[i];
+        totalWeight += dataArray[i];
+    }
+    const centroid = totalWeight > 0 ? weightedSum / totalWeight : 0;
+
+    // Dominant frequency bin
+    let maxBin = 0, maxVal = 0;
+    for (let i = 0; i < bufferLength; i++) {
+        if (dataArray[i] > maxVal) { maxVal = dataArray[i]; maxBin = i; }
+    }
+
+    // Silence vs speech detection (RMS threshold)
+    const SILENCE_THRESH = 0.06;
+    const isSilent = rms < SILENCE_THRESH;
+    if (isSilent) {
+        audioSilenceMs += dt;
+        if (!audioLastWasSilent) { /* transition to silence */ }
+    } else {
+        audioSpeechMs += dt;
+        if (audioLastWasSilent) {
+            audioSpeechSegments++; // new speech burst
+        }
+    }
+    audioLastWasSilent = isSilent;
+
+    audioFeatureHistory.push({
+        energy: rms,
+        centroid: centroid,
+        dominantBin: maxBin,
+        isSilent: isSilent,
+        timestamp: now
+    });
+}
+
+function computeAudioAnalysis() {
+    if (audioFeatureHistory.length < 3) return null;
+
+    const n = audioFeatureHistory.length;
+    let sumEnergy = 0, sumCentroid = 0;
+    const energyValues = [];
+
+    for (const f of audioFeatureHistory) {
+        sumEnergy += f.energy;
+        sumCentroid += f.centroid;
+        energyValues.push(f.energy);
+    }
+
+    const avgEnergy = sumEnergy / n;
+    const avgCentroid = sumCentroid / n;
+
+    // Energy variability (std dev)
+    let sumSqDiff = 0;
+    for (const e of energyValues) sumSqDiff += (e - avgEnergy) ** 2;
+    const energyStd = Math.sqrt(sumSqDiff / n);
+
+    const totalTimeMs = audioSpeechMs + audioSilenceMs;
+    const pauseRatio = totalTimeMs > 0 ? audioSilenceMs / totalTimeMs : 0;
+    const speechRate = totalTimeMs > 0 ? (audioSpeechSegments / (totalTimeMs / 1000)) : 0;
+    const avgPauseDur = audioSpeechSegments > 0 ? (audioSilenceMs / 1000) / Math.max(1, audioSpeechSegments) : 0;
+
+    // Depression scoring: low energy + low centroid + high pause ratio + low variability (monotone)
+    // Each sub-score maps to 0-1 range
+    const energyScore = Math.max(0, Math.min(1, 1 - (avgEnergy / 0.25)));      // lower energy → higher score
+    const centroidScore = Math.max(0, Math.min(1, 1 - (avgCentroid / 64)));     // lower centroid → higher score
+    const pauseScore = Math.max(0, Math.min(1, pauseRatio * 1.5));              // more pauses → higher score
+    const monotoneScore = Math.max(0, Math.min(1, 1 - (energyStd / 0.12)));    // less variation → higher score
+
+    let audioProb = (
+        energyScore * 0.30 +
+        centroidScore * 0.25 +
+        pauseScore * 0.25 +
+        monotoneScore * 0.20
+    );
+    audioProb = Math.max(0, Math.min(1, audioProb));
+
+    return {
+        avgEnergy: avgEnergy,
+        avgCentroid: avgCentroid,
+        energyVariability: energyStd,
+        pauseRatio: pauseRatio,
+        speechRate: speechRate,
+        avgPauseDuration: avgPauseDur,
+        audioProb: audioProb,
+        samplesCollected: n,
+        totalTimeSec: totalTimeMs / 1000
+    };
+}
+
 function stopAudioVisualizer() {
     if (waveformAnimId) { cancelAnimationFrame(waveformAnimId); waveformAnimId = null; }
+    if (audioCollectIntervalId) { clearInterval(audioCollectIntervalId); audioCollectIntervalId = null; }
     if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
     if (audioContext) { audioContext.close(); audioContext = null; }
     const vis = document.getElementById('audio-visualizer');
@@ -895,6 +1022,7 @@ async function submitForAnalysis() {
 
     const interviewText = interviewResponses.join(' ');
     const visualData = computeVisualAnalysis();
+    const audioData = computeAudioAnalysis();
 
     // Stop webcam stream
     if (webcamStream) {
@@ -906,11 +1034,11 @@ async function submitForAnalysis() {
         const response = await fetch('/api/predict', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phqAnswers, interviewText, visualData })
+            body: JSON.stringify({ phqAnswers, interviewText, visualData, audioData })
         });
         const data = await response.json();
         hideLoading();
-        renderResults(data, visualData);
+        renderResults(data, visualData, audioData);
         goTo('results');
     } catch (err) {
         hideLoading();
@@ -919,7 +1047,7 @@ async function submitForAnalysis() {
     }
 }
 
-function renderResults(data, visualData) {
+function renderResults(data, visualData, audioData) {
     const prob = data.combined.probability;
     const pct = Math.round(prob * 100);
     const circumference = 2 * Math.PI * 52;
@@ -958,6 +1086,7 @@ function renderResults(data, visualData) {
     else if (textProb >= 0.4) { textBadge.textContent = 'Moderate'; textBadge.className = 'result-badge moderate'; }
     else { textBadge.textContent = 'Normal'; textBadge.className = 'result-badge low'; }
     fetchSentiment();
+    renderAudioResults(audioData);
     renderVisualResults(visualData);
 }
 
@@ -987,6 +1116,54 @@ function renderVisualResults(visualData) {
         `<div class="expression-row"><span class="expression-emoji">${emojiMap[name]}</span><span class="expression-name">${name.charAt(0).toUpperCase() + name.slice(1)}</span><div class="expression-track"><div class="expression-bar" style="width:${value * 100}%; background:${colorMap[name]}"></div></div><span class="expression-pct">${(value * 100).toFixed(0)}%</span></div>`
     ).join('');
     note.textContent = `Based on ${visualData.samplesCollected} snapshots (${Math.round(visualData.faceDetectionRate * 100)}% detection rate).`;
+}
+
+function renderAudioResults(audioData) {
+    const badge = document.getElementById('audio-badge');
+    const probBar = document.getElementById('audio-prob-bar');
+    const probVal = document.getElementById('audio-prob-val');
+    const energyBar = document.getElementById('audio-energy-bar');
+    const energyVal = document.getElementById('audio-energy-val');
+    const pauseBar = document.getElementById('audio-pause-bar');
+    const pauseVal = document.getElementById('audio-pause-val');
+    const rateVal = document.getElementById('audio-rate-val');
+    const note = document.getElementById('audio-note');
+
+    if (!audioData || audioData.samplesCollected < 3) {
+        if (badge) { badge.textContent = 'No Data'; badge.className = 'result-badge moderate'; }
+        if (probVal) probVal.textContent = 'N/A';
+        if (energyVal) energyVal.textContent = 'N/A';
+        if (pauseVal) pauseVal.textContent = 'N/A';
+        if (rateVal) rateVal.textContent = 'N/A';
+        if (note) note.textContent = 'Microphone was not used. Use the mic button next time for voice analysis.';
+        return;
+    }
+
+    const ap = audioData.audioProb;
+    const apPct = Math.round(ap * 100);
+    if (probVal) probVal.textContent = apPct + '%';
+    if (probBar) probBar.style.width = apPct + '%';
+
+    if (ap >= 0.6) { badge.textContent = 'Elevated'; badge.className = 'result-badge high'; }
+    else if (ap >= 0.4) { badge.textContent = 'Moderate'; badge.className = 'result-badge moderate'; }
+    else { badge.textContent = 'Normal'; badge.className = 'result-badge low'; }
+
+    // Energy (scale 0-0.3 to 0-100%)
+    const energyPct = Math.min(100, Math.round((audioData.avgEnergy / 0.3) * 100));
+    if (energyVal) energyVal.textContent = energyPct + '%';
+    if (energyBar) energyBar.style.width = energyPct + '%';
+
+    // Pause ratio
+    const pausePct = Math.round(audioData.pauseRatio * 100);
+    if (pauseVal) pauseVal.textContent = pausePct + '%';
+    if (pauseBar) pauseBar.style.width = pausePct + '%';
+
+    // Speech rate
+    if (rateVal) rateVal.textContent = audioData.speechRate.toFixed(1) + ' segments/s';
+
+    if (note) {
+        note.textContent = `Based on ${audioData.samplesCollected} audio samples over ${audioData.totalTimeSec.toFixed(0)}s of recording.`;
+    }
 }
 
 async function fetchSentiment() {
@@ -1033,6 +1210,14 @@ function restart() {
     faceDetectedCount = 0;
     totalDetectionAttempts = 0;
     lastRecordingBlob = null;
+    // Reset audio analysis state
+    audioFeatureHistory = [];
+    audioSilenceMs = 0;
+    audioSpeechMs = 0;
+    audioSpeechSegments = 0;
+    audioLastWasSilent = true;
+    audioLastSampleTime = 0;
+    if (audioCollectIntervalId) { clearInterval(audioCollectIntervalId); audioCollectIntervalId = null; }
     if (lastRecordingUrl) { URL.revokeObjectURL(lastRecordingUrl); lastRecordingUrl = null; }
     document.getElementById('chat-input').disabled = false;
     document.getElementById('send-btn').disabled = false;

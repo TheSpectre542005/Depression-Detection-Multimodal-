@@ -468,6 +468,49 @@
       </div>
     </div>
 
+    <div class="result-cards-row">
+      <div class="result-card glass">
+        <div class="result-card-header">
+          <h3>🎙️ Voice Analysis</h3>
+          <span class="result-badge" id="audio-badge">--</span>
+        </div>
+        <div class="score-bar">
+          <div class="score-bar-label">
+            <span>Depression Probability</span>
+            <span id="audio-prob-val">--%</span>
+          </div>
+          <div class="score-bar-track">
+            <div class="score-bar-fill" id="audio-prob-bar" style="width:0; background: var(--accent-g)"></div>
+          </div>
+        </div>
+        <div class="score-bar">
+          <div class="score-bar-label">
+            <span>Voice Energy</span>
+            <span id="audio-energy-val">--%</span>
+          </div>
+          <div class="score-bar-track">
+            <div class="score-bar-fill" id="audio-energy-bar" style="width:0; background: #9B6FFF"></div>
+          </div>
+        </div>
+        <div class="score-bar">
+          <div class="score-bar-label">
+            <span>Pause Ratio</span>
+            <span id="audio-pause-val">--%</span>
+          </div>
+          <div class="score-bar-track">
+            <div class="score-bar-fill" id="audio-pause-bar" style="width:0; background: #F59E0B"></div>
+          </div>
+        </div>
+        <div class="score-bar">
+          <div class="score-bar-label">
+            <span>Speech Rate</span>
+            <span id="audio-rate-val">--</span>
+          </div>
+        </div>
+        <p style="font-size:0.78rem; color:var(--text-4); margin-top:12px" id="audio-note"></p>
+      </div>
+    </div>
+
     <div class="result-card result-card-full glass" id="visual-result-card">
       <div class="result-card-header">
         <h3>👁️ Facial Analysis</h3>
