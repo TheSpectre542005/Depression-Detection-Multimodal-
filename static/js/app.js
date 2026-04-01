@@ -1,7 +1,7 @@
 // ================================================================
 //  SENTIRA — Frontend Application Logic
 //  Flow: Landing → Setup → Interview → PHQ-8 → Results
-//  Features: TTS, STT, Audio Recording + Playback, Face Detection
+//  Features: TTS, STT, Audio Recording + Playback, Smooth Face Detection
 // ================================================================
 
 // ── State ──────────────────────────────────────────────────────
@@ -12,12 +12,15 @@ let interviewIndex = 0;
 let interviewResponses = [];
 let webcamStream = null;
 
-// Face detection
+// Face detection — smooth & dynamic
 let faceModelsLoaded = false;
 let faceDetectionInterval = null;
 let expressionHistory = [];
 let faceDetectedCount = 0;
 let totalDetectionAttempts = 0;
+let smoothedExpressions = null; // for smooth interpolation
+let lastFaceBox = null; // for smooth box animation
+let faceOverlayAnimId = null;
 
 // Audio TTS + STT
 let isSpeaking = false;
@@ -44,6 +47,37 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let lastRecordingBlob = null;
 let lastRecordingUrl = null;
+
+// Shared audio stream manager — avoids multiple permission requests
+let _sharedAudioStream = null;
+async function getSharedAudioStream() {
+    if (_sharedAudioStream && _sharedAudioStream.active) return _sharedAudioStream;
+    _sharedAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    return _sharedAudioStream;
+}
+function releaseSharedAudioStream() {
+    if (_sharedAudioStream) { _sharedAudioStream.getTracks().forEach(t => t.stop()); _sharedAudioStream = null; }
+}
+
+// ── Toast Notification System ─────────────────────────────────
+function showToast(message, type = 'info', duration = 4000) {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    const icons = { info: 'ℹ️', success: '✅', warning: '⚠️', error: '❌' };
+    toast.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span class="toast-msg">${message}</span>`;
+    container.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('show'));
+    setTimeout(() => {
+        toast.classList.remove('show');
+        toast.addEventListener('transitionend', () => toast.remove());
+    }, duration);
+}
 
 // Setup screen state
 let setupCamStream = null;
@@ -405,7 +439,7 @@ function toggleMic() {
 function startRecording() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-        alert('Speech recognition is not supported in your browser. Please use Chrome or Edge.');
+        showToast('Speech recognition is not supported in your browser. Please use Chrome or Edge.', 'warning', 5000);
         return;
     }
 
@@ -483,12 +517,12 @@ function stopRecording() {
     if (recTimerInterval) { clearInterval(recTimerInterval); recTimerInterval = null; }
 }
 
-// ── Media Recorder (for playback) ────────────────────────────────
+// ── Media Recorder (for playback) — uses shared audio stream ─────
 async function startMediaRecorder() {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await getSharedAudioStream();
         recordedChunks = [];
-        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        mediaRecorder = new MediaRecorder(stream.clone(), { mimeType: 'audio/webm' });
         mediaRecorder.ondataavailable = e => {
             if (e.data.size > 0) recordedChunks.push(e.data);
         };
@@ -497,11 +531,9 @@ async function startMediaRecorder() {
                 lastRecordingBlob = new Blob(recordedChunks, { type: 'audio/webm' });
                 if (lastRecordingUrl) URL.revokeObjectURL(lastRecordingUrl);
                 lastRecordingUrl = URL.createObjectURL(lastRecordingBlob);
-                // Show playback button
                 const playBtn = document.getElementById('playback-btn');
                 if (playBtn) playBtn.style.display = 'flex';
             }
-            stream.getTracks().forEach(t => t.stop());
         };
         mediaRecorder.start();
     } catch (err) {
@@ -539,7 +571,7 @@ async function startAudioVisualizer() {
     visualizer.style.display = 'flex';
 
     try {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micStream = await getSharedAudioStream();
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const source = audioContext.createMediaStreamSource(micStream);
         analyser = audioContext.createAnalyser();
@@ -550,7 +582,6 @@ async function startAudioVisualizer() {
         const dataArray = new Uint8Array(bufferLength);
         const ctx = canvas.getContext('2d');
 
-        // Start audio feature collection (every 500ms)
         audioLastSampleTime = Date.now();
         if (audioCollectIntervalId) clearInterval(audioCollectIntervalId);
         audioCollectIntervalId = setInterval(() => {
@@ -577,7 +608,7 @@ async function startAudioVisualizer() {
         }
         draw();
     } catch (err) {
-        console.error('Audio visualizer error:', err);
+        showToast('Microphone access failed. Voice analysis unavailable.', 'warning');
     }
 }
 
@@ -694,7 +725,7 @@ function computeAudioAnalysis() {
 function stopAudioVisualizer() {
     if (waveformAnimId) { cancelAnimationFrame(waveformAnimId); waveformAnimId = null; }
     if (audioCollectIntervalId) { clearInterval(audioCollectIntervalId); audioCollectIntervalId = null; }
-    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    micStream = null; // don't stop shared stream here
     if (audioContext) { audioContext.close(); audioContext = null; }
     const vis = document.getElementById('audio-visualizer');
     if (vis) vis.style.display = 'none';
@@ -890,27 +921,36 @@ function finishInterview() {
 // ═══════════════════════════════════════════════════════════════════
 async function loadFaceModels() {
     if (faceModelsLoaded) return;
+    const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000));
     try {
-        const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
-        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-        await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+        await Promise.race([
+            Promise.all([
+                faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+            ]),
+            timeout
+        ]);
         faceModelsLoaded = true;
-        console.log('✅ Face detection models loaded');
+        showToast('Face detection models loaded', 'success', 2000);
     } catch (err) {
+        showToast('Face models failed to load. Facial analysis unavailable.', 'warning', 5000);
         console.error('Face model load error:', err);
     }
 }
 
 function startFaceDetection() {
     if (faceDetectionInterval) return;
+    // Fast detection interval (800ms) for smooth, dynamic updates
     faceDetectionInterval = setInterval(async () => {
         const video = document.getElementById('webcam-video');
         if (!video || video.paused || video.ended || !faceModelsLoaded) return;
         totalDetectionAttempts++;
         try {
             const detection = await faceapi
-                .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.4 }))
+                .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.35 }))
                 .withFaceExpressions();
+            const liveEl = document.getElementById('live-expression');
             if (detection) {
                 faceDetectedCount++;
                 const expr = detection.expressions;
@@ -919,30 +959,92 @@ function startFaceDetection() {
                     angry: expr.angry, fearful: expr.fearful, disgusted: expr.disgusted,
                     surprised: expr.surprised,
                 });
-                const sorted = Object.entries(expr).sort((a, b) => b[1] - a[1]);
+                // Smooth interpolation — blend new values with previous
+                const alpha = 0.4; // smoothing factor (0=no update, 1=instant)
+                if (!smoothedExpressions) {
+                    smoothedExpressions = { ...expr };
+                } else {
+                    for (const k of Object.keys(smoothedExpressions)) {
+                        smoothedExpressions[k] = smoothedExpressions[k] * (1 - alpha) + (expr[k] || 0) * alpha;
+                    }
+                }
+                const sorted = Object.entries(smoothedExpressions).sort((a, b) => b[1] - a[1]);
                 const dominant = sorted[0];
                 const emojiMap = { neutral: '😐', happy: '😊', sad: '😢', angry: '😠', fearful: '😨', disgusted: '🤢', surprised: '😲' };
-                document.getElementById('live-expression').textContent =
-                    `${emojiMap[dominant[0]] || ''} ${dominant[0]} (${(dominant[1] * 100).toFixed(0)}%)`;
-                drawFaceOverlay(detection);
+                if (liveEl) liveEl.textContent = `${emojiMap[dominant[0]] || ''} ${dominant[0]} (${(dominant[1] * 100).toFixed(0)}%)`;
+                // Animate face overlay smoothly
+                animateFaceOverlay(detection);
+            } else {
+                if (liveEl && faceDetectedCount === 0) liveEl.textContent = 'No face detected';
             }
-        } catch (err) { /* skip */ }
-    }, 2500);
+        } catch (err) { /* skip frame */ }
+    }, 800);
 }
 
-function drawFaceOverlay(detection) {
+// ── Smooth animated face overlay ─────────────────────────────────
+let _targetBox = null;
+let _currentBox = null;
+function animateFaceOverlay(detection) {
     const canvas = document.getElementById('webcam-overlay');
     const video = document.getElementById('webcam-video');
     if (!canvas || !video) return;
     canvas.style.display = 'block';
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
     const box = detection.detection.box;
-    ctx.strokeStyle = '#10B981';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(canvas.width - box.x - box.width, box.y, box.width, box.height);
+    _targetBox = { x: canvas.width - box.x - box.width, y: box.y, w: box.width, h: box.height };
+    if (!_currentBox) _currentBox = { ..._targetBox };
+    if (!faceOverlayAnimId) drawSmoothOverlay(canvas);
+}
+
+function drawSmoothOverlay(canvas) {
+    const ctx = canvas.getContext('2d');
+    function frame() {
+        if (!_targetBox || !_currentBox) { faceOverlayAnimId = null; return; }
+        faceOverlayAnimId = requestAnimationFrame(frame);
+        // Lerp towards target
+        const s = 0.15;
+        _currentBox.x += (_targetBox.x - _currentBox.x) * s;
+        _currentBox.y += (_targetBox.y - _currentBox.y) * s;
+        _currentBox.w += (_targetBox.w - _currentBox.w) * s;
+        _currentBox.h += (_targetBox.h - _currentBox.h) * s;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Glowing rounded rect
+        const r = 8;
+        const { x, y, w, h } = _currentBox;
+        ctx.beginPath();
+        ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        ctx.strokeStyle = '#10B981';
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = '#10B981';
+        ctx.shadowBlur = 12;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        // Corner accents
+        const cl = 12;
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#34D399';
+        [[x,y,1,1],[x+w,y,-1,1],[x,y+h,1,-1],[x+w,y+h,-1,-1]].forEach(([cx,cy,dx,dy]) => {
+            ctx.beginPath(); ctx.moveTo(cx, cy + dy*cl); ctx.lineTo(cx, cy); ctx.lineTo(cx + dx*cl, cy); ctx.stroke();
+        });
+        // Dominant expression label near box
+        if (smoothedExpressions) {
+            const sorted = Object.entries(smoothedExpressions).sort((a, b) => b[1] - a[1]);
+            const emojiMap = { neutral: '😐', happy: '😊', sad: '😢', angry: '😠', fearful: '😨', disgusted: '🤢', surprised: '😲' };
+            ctx.font = '13px "DM Sans", sans-serif';
+            ctx.fillStyle = '#10B981';
+            ctx.fillText(`${emojiMap[sorted[0][0]]||''} ${sorted[0][0]}`, x, y - 8);
+        }
+    }
+    frame();
 }
 
 function stopFaceDetection() {
@@ -1043,7 +1145,7 @@ async function submitForAnalysis() {
     } catch (err) {
         hideLoading();
         console.error('Prediction error:', err);
-        alert('Error analyzing responses. Please try again.');
+        showToast('Error analyzing responses. Please try again.', 'error');
     }
 }
 
@@ -1222,9 +1324,12 @@ function restart() {
     document.getElementById('chat-input').disabled = false;
     document.getElementById('send-btn').disabled = false;
     stopFaceDetection();
+    if (faceOverlayAnimId) { cancelAnimationFrame(faceOverlayAnimId); faceOverlayAnimId = null; }
+    _targetBox = null; _currentBox = null; smoothedExpressions = null;
     hideMiniWebcam();
     stopRecording();
     stopAudioVisualizer();
+    releaseSharedAudioStream();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     if (webcamStream) { webcamStream.getTracks().forEach(t => t.stop()); webcamStream = null; }
     if (setupCamStream) { setupCamStream.getTracks().forEach(t => t.stop()); setupCamStream = null; }
@@ -1238,3 +1343,34 @@ document.addEventListener('keydown', (e) => {
         selectPhqOption(parseInt(e.key));
     }
 });
+
+// ── Export Results as Image ───────────────────────────────────────
+function exportResults() {
+    const resultsEl = document.getElementById('results');
+    if (!resultsEl) return;
+    showToast('Preparing your report...', 'info', 2000);
+    // Use canvas-based screenshot via html2canvas if available, else simple text export
+    if (typeof html2canvas !== 'undefined') {
+        html2canvas(resultsEl, { backgroundColor: '#0a0a0f', scale: 2 }).then(canvas => {
+            const link = document.createElement('a');
+            link.download = 'SENTIRA_Report.png';
+            link.href = canvas.toDataURL();
+            link.click();
+            showToast('Report downloaded!', 'success');
+        });
+    } else {
+        // Fallback: export as text summary
+        const gaugeVal = document.getElementById('gauge-value')?.textContent || '';
+        const riskLabel = document.getElementById('risk-label')?.textContent || '';
+        const phqScore = document.getElementById('phq-score-val')?.textContent || '';
+        const textProb = document.getElementById('text-prob-val')?.textContent || '';
+        const summary = `SENTIRA Depression Screening Report\n${'='.repeat(40)}\nRisk Score: ${gaugeVal}\nRisk Level: ${riskLabel}\nPHQ-8 Score: ${phqScore}\nText Analysis: ${textProb}\n\nDate: ${new Date().toLocaleDateString()}\n\nDisclaimer: This is a screening tool, not a clinical diagnosis.`;
+        const blob = new Blob([summary], { type: 'text/plain' });
+        const link = document.createElement('a');
+        link.download = 'SENTIRA_Report.txt';
+        link.href = URL.createObjectURL(blob);
+        link.click();
+        URL.revokeObjectURL(link.href);
+        showToast('Report downloaded!', 'success');
+    }
+}

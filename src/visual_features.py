@@ -1,13 +1,18 @@
 # src/visual_features.py
 import pandas as pd
 import numpy as np
-import os
+import os, logging
 
-DATA_ROOT = r"C:\Users\Rishil\Downloads\E-DAIC\data"
-SAVE_PATH = "data/features/visual_features.csv"
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from config import DATA_ROOT, FEATURES_DIR
+
+logger = logging.getLogger(__name__)
+
+SAVE_PATH = os.path.join(FEATURES_DIR, "visual_features.csv")
 
 def build_visual_features(participant_ids):
-    print("\n👁️  Extracting visual features...")
+    logger.info("Extracting visual features...")
     records = []
     missing = []
 
@@ -35,7 +40,7 @@ def build_visual_features(participant_ids):
             use_cols = au_r_cols + au_c_cols + pose_cols + gaze_cols
 
             if not use_cols:
-                print(f"  ⚠️  No feature columns found for {pid}")
+                logger.warning(f"No feature columns found for {pid}")
                 continue
 
             sub    = df[use_cols].select_dtypes(include=[np.number])
@@ -56,18 +61,19 @@ def build_visual_features(participant_ids):
             records.append(record)
 
         except Exception as e:
-            print(f"  ⚠️  Error on {pid}: {e}")
+            logger.warning(f"Error on {pid}: {e}")
 
     if missing:
-        print(f"  Missing visual features: {len(missing)} participants")
+        logger.info(f"Missing visual features: {len(missing)} participants")
 
     df = pd.DataFrame(records).fillna(0)
-    os.makedirs('data/features', exist_ok=True)
+    os.makedirs(FEATURES_DIR, exist_ok=True)
     df.to_csv(SAVE_PATH, index=False)
-    print(f"  ✅ Visual features saved → {SAVE_PATH}")
-    print(f"  Shape: {df.shape}")
+    logger.info(f"  ✅ Visual features saved → {SAVE_PATH}")
+    logger.info(f"  Shape: {df.shape}")
     return df
 
 if __name__ == "__main__":
-    labels = pd.read_csv('data/features/master_labels.csv')
+    logging.basicConfig(level=logging.INFO)
+    labels = pd.read_csv(os.path.join(FEATURES_DIR, 'master_labels.csv'))
     build_visual_features(labels['pid'].tolist())

@@ -2231,3 +2231,90 @@ body::after {
     right: 16px;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   TOAST NOTIFICATIONS
+   ═══════════════════════════════════════════════════════════════════ */
+#toast-container {
+  position: fixed;
+  top: 84px;
+  right: 20px;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 22px;
+  border-radius: var(--radius);
+  font: 500 0.85rem var(--font-ui);
+  color: var(--text-1);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-1);
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateX(40px);
+  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out);
+  max-width: 380px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.toast-icon { font-size: 1.1rem; flex-shrink: 0; }
+.toast-msg { flex: 1; line-height: 1.4; }
+
+.toast-info { background: rgba(79, 142, 247, 0.15); border-color: rgba(79, 142, 247, 0.3); }
+.toast-success { background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.3); }
+.toast-warning { background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.3); }
+.toast-error { background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.3); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   SMOOTH FACE DETECTION OVERLAY
+   ═══════════════════════════════════════════════════════════════════ */
+#webcam-overlay {
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+}
+
+.expression-live {
+  transition: all 0.4s var(--ease-out);
+}
+
+.expression-live-label {
+  font: 500 0.85rem var(--font-ui);
+  transition: color 0.3s, opacity 0.3s;
+}
+
+#live-expression {
+  display: inline-block;
+  transition: all 0.3s var(--ease-out);
+  min-width: 140px;
+}
+
+/* Pulse animation on face detected */
+@keyframes facePulse {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+.webcam-card h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

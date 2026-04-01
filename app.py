@@ -1,6 +1,8 @@
 # app.py — Depression Detection Web Application
 import os
 import re
+import sys
+import logging
 import numpy as np
 import joblib
 from flask import Flask, render_template, request, jsonify
@@ -10,23 +12,43 @@ from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
+from config import FLASK_DEBUG, FLASK_PORT, MODELS_DIR, N_TFIDF
+
+# ── Logging ────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+)
+logger = logging.getLogger('sentira')
+
 nltk.download('stopwords', quiet=True)
 nltk.download('wordnet', quiet=True)
 
 app = Flask(__name__)
 
 # ---------------------------------------------------------------------------
-# Load trained models & scalers
+# Load trained models & scalers (with error handling)
 # ---------------------------------------------------------------------------
-text_model  = joblib.load('models/text_model.pkl')
-text_scaler = joblib.load('models/text_scaler.pkl')
+try:
+    text_model  = joblib.load(os.path.join(MODELS_DIR, 'text_model.pkl'))
+    text_scaler = joblib.load(os.path.join(MODELS_DIR, 'text_scaler.pkl'))
+    logger.info("✅ Text model + scaler loaded")
+except FileNotFoundError:
+    logger.error("❌ Text model files not found! Run main.py to train models first.")
+    sys.exit(1)
+
+# Load TF-IDF vectorizer (critical fix — no more zero vectors)
+try:
+    tfidf_vectorizer = joblib.load(os.path.join(MODELS_DIR, 'text_tfidf.pkl'))
+    logger.info("✅ TF-IDF vectorizer loaded")
+except FileNotFoundError:
+    tfidf_vectorizer = None
+    logger.warning("⚠️  TF-IDF vectorizer not found — text features will use zeros for TF-IDF slots")
 
 # Text processing tools
 sid        = SentimentIntensityAnalyzer()
 stop_words = set(stopwords.words('english'))
 lemmatizer = WordNetLemmatizer()
-
-N_TFIDF = 50  # must match training pipeline
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -62,8 +84,15 @@ def extract_text_features(raw_text):
         float(np.mean([len(w) for w in words])) if words else 0,
         0.0,  # avg_conf — not available for new text
     ]
-    # TF-IDF slots (zeros — vectorizer unavailable for new text)
-    features.extend([0.0] * N_TFIDF)
+
+    # TF-IDF — use the saved vectorizer if available
+    if tfidf_vectorizer is not None:
+        clean_text = preprocess(raw_text)
+        tfidf_vector = tfidf_vectorizer.transform([clean_text]).toarray()[0]
+        features.extend(tfidf_vector)
+    else:
+        features.extend([0.0] * N_TFIDF)
+
     return np.array(features, dtype=np.float64)
 
 
@@ -80,6 +109,13 @@ def phq8_severity(score):
         return 'Severe'
 
 
+def validate_phq_answers(answers):
+    """Validate PHQ-8 answers: exactly 8 items, each 0-3."""
+    if not isinstance(answers, list) or len(answers) != 8:
+        return False
+    return all(isinstance(a, (int, float)) and 0 <= int(a) <= 3 for a in answers)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -91,8 +127,15 @@ def index():
 
 @app.route('/api/phq', methods=['POST'])
 def phq_score():
-    answers = request.json.get('answers', [])
-    total   = sum(int(a) for a in answers)
+    data = request.json
+    if not data:
+        return jsonify({'error': 'Missing request body'}), 400
+
+    answers = data.get('answers', [])
+    if not validate_phq_answers(answers):
+        return jsonify({'error': 'Invalid PHQ-8 answers. Expected 8 integers (0-3).'}), 400
+
+    total = sum(int(a) for a in answers)
     return jsonify({
         'score':    total,
         'maxScore': 24,
@@ -103,9 +146,16 @@ def phq_score():
 
 @app.route('/api/analyze-text', methods=['POST'])
 def analyze_text():
-    text = request.json.get('text', '')
-    if not text or len(text.strip()) < 10:
-        return jsonify({'error': 'Need more text for analysis'}), 400
+    data = request.json
+    if not data:
+        return jsonify({'error': 'Missing request body'}), 400
+
+    text = data.get('text', '')
+    if not isinstance(text, str) or len(text.strip()) < 10:
+        return jsonify({'error': 'Need at least 10 characters of text for analysis'}), 400
+
+    # Truncate excessively long input
+    text = text[:10000]
 
     features = extract_text_features(text)
     scaled   = text_scaler.transform(features.reshape(1, -1))
@@ -125,11 +175,17 @@ def analyze_text():
 
 @app.route('/api/predict', methods=['POST'])
 def predict():
-    data    = request.json
+    data = request.json
+    if not data:
+        return jsonify({'error': 'Missing request body'}), 400
+
     results = {}
 
     # ── PHQ-8 ──────────────────────────────────────────────────
     phq_answers = data.get('phqAnswers', [])
+    if phq_answers and not validate_phq_answers(phq_answers):
+        return jsonify({'error': 'Invalid PHQ-8 answers'}), 400
+
     phq_total   = sum(int(a) for a in phq_answers) if phq_answers else 0
     results['phq'] = {
         'score':     phq_total,
@@ -139,8 +195,10 @@ def predict():
 
     # ── Text analysis ──────────────────────────────────────────
     text      = data.get('interviewText', '')
+    if isinstance(text, str):
+        text = text[:10000]  # Truncate excessively long input
     text_prob = 0.5
-    if text and len(text.strip()) >= 10:
+    if text and isinstance(text, str) and len(text.strip()) >= 10:
         feats  = extract_text_features(text)
         scaled = text_scaler.transform(feats.reshape(1, -1))
         text_prob = float(text_model.predict_proba(scaled)[0][1])
@@ -151,47 +209,48 @@ def predict():
     }
 
     # ── Combined assessment ────────────────────────────────────
-    phq_norm      = min(phq_total / 24.0, 1.0)
+    phq_norm = min(phq_total / 24.0, 1.0)
 
     # Include facial analysis if available
     visual_data = data.get('visualData', None)
     visual_prob = None
-    if visual_data and visual_data.get('samplesCollected', 0) > 0:
-        visual_prob = visual_data.get('visualProb', 0.5)
+    if (visual_data and isinstance(visual_data, dict)
+            and visual_data.get('samplesCollected', 0) > 0):
+        visual_prob = float(visual_data.get('visualProb', 0.5))
+        visual_prob = max(0.0, min(1.0, visual_prob))  # Clamp
         results['visual'] = {
             'probability': round(visual_prob, 4),
-            'flatAffect':  round(visual_data.get('flatAffect', 0), 4),
+            'flatAffect':  round(float(visual_data.get('flatAffect', 0)), 4),
             'samples':     visual_data['samplesCollected'],
         }
 
     # Include audio analysis if available
     audio_data = data.get('audioData', None)
     audio_prob = None
-    if audio_data and audio_data.get('samplesCollected', 0) >= 3:
-        audio_prob = audio_data.get('audioProb', 0.5)
+    if (audio_data and isinstance(audio_data, dict)
+            and audio_data.get('samplesCollected', 0) >= 3):
+        audio_prob = float(audio_data.get('audioProb', 0.5))
+        audio_prob = max(0.0, min(1.0, audio_prob))  # Clamp
         results['audio'] = {
             'probability':      round(audio_prob, 4),
-            'avgEnergy':        round(audio_data.get('avgEnergy', 0), 4),
-            'pauseRatio':       round(audio_data.get('pauseRatio', 0), 4),
-            'speechRate':       round(audio_data.get('speechRate', 0), 4),
+            'avgEnergy':        round(float(audio_data.get('avgEnergy', 0)), 4),
+            'pauseRatio':       round(float(audio_data.get('pauseRatio', 0)), 4),
+            'speechRate':       round(float(audio_data.get('speechRate', 0)), 4),
             'samples':          audio_data['samplesCollected'],
         }
 
     # Adaptive fusion based on available modalities
+    # Weights informed by historical model performance (text > phq > visual > audio)
     has_visual = visual_prob is not None
     has_audio  = audio_prob is not None
 
     if has_visual and has_audio:
-        # 4-way fusion
-        combined_prob = 0.25 * phq_norm + 0.25 * text_prob + 0.25 * audio_prob + 0.25 * visual_prob
+        combined_prob = 0.30 * phq_norm + 0.30 * text_prob + 0.20 * audio_prob + 0.20 * visual_prob
     elif has_visual:
-        # 3-way: PHQ + Text + Visual
         combined_prob = 0.35 * phq_norm + 0.35 * text_prob + 0.30 * visual_prob
     elif has_audio:
-        # 3-way: PHQ + Text + Audio
         combined_prob = 0.35 * phq_norm + 0.35 * text_prob + 0.30 * audio_prob
     else:
-        # 2-way: PHQ + Text only
         combined_prob = 0.5 * phq_norm + 0.5 * text_prob
 
     if combined_prob >= 0.6:
@@ -206,13 +265,18 @@ def predict():
         'riskLevel':   risk,
         'prediction':  int(combined_prob >= 0.5),
     }
+
+    logger.info(f"Prediction: PHQ={phq_total}, text_prob={text_prob:.3f}, "
+                f"visual={'Y' if has_visual else 'N'}, audio={'Y' if has_audio else 'N'}, "
+                f"combined={combined_prob:.3f} ({risk})")
+
     return jsonify(results)
 
 
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
     print("\n" + "=" * 55)
-    print("  \U0001f9e0 Depression Detection Web Application")
-    print("  \U0001f517 Open http://localhost:5000")
+    print("  \U0001f9e0 SENTIRA — Depression Detection Web Application")
+    print(f"  \U0001f517 Open http://localhost:{FLASK_PORT}")
     print("=" * 55 + "\n")
-    app.run(debug=True, port=5000)
+    app.run(debug=FLASK_DEBUG, port=FLASK_PORT)

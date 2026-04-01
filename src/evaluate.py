@@ -5,7 +5,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os
+import os, logging
 
 from sklearn.metrics import (
     accuracy_score, f1_score, precision_score, recall_score,
@@ -13,24 +13,29 @@ from sklearn.metrics import (
     roc_curve
 )
 
-os.makedirs('results', exist_ok=True)
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from config import RESULTS_DIR
+
+os.makedirs(RESULTS_DIR, exist_ok=True)
+logger = logging.getLogger(__name__)
 
 def evaluate(y_true, y_pred, y_prob, name="Model"):
-    print(f"\n{'='*50}")
-    print(f"  📊 {name}")
-    print(f"{'='*50}")
+    logger.info(f"\n{'='*50}")
+    logger.info(f"  📊 {name}")
+    logger.info(f"{'='*50}")
     acc  = accuracy_score(y_true, y_pred)
     f1   = f1_score(y_true, y_pred)
     prec = precision_score(y_true, y_pred)
     rec  = recall_score(y_true, y_pred)
     auc  = roc_auc_score(y_true, y_prob)
 
-    print(f"  Accuracy  : {acc:.4f}")
-    print(f"  F1-Score  : {f1:.4f}")
-    print(f"  Precision : {prec:.4f}")
-    print(f"  Recall    : {rec:.4f}")
-    print(f"  AUC-ROC   : {auc:.4f}")
-    print(f"\n{classification_report(y_true, y_pred, target_names=['Not Depressed','Depressed'])}")
+    logger.info(f"  Accuracy  : {acc:.4f}")
+    logger.info(f"  F1-Score  : {f1:.4f}")
+    logger.info(f"  Precision : {prec:.4f}")
+    logger.info(f"  Recall    : {rec:.4f}")
+    logger.info(f"  AUC-ROC   : {auc:.4f}")
+    logger.info(f"\n{classification_report(y_true, y_pred, target_names=['Not Depressed','Depressed'])}")
 
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(5, 4))
@@ -42,7 +47,7 @@ def evaluate(y_true, y_pred, y_prob, name="Model"):
     plt.xlabel('Predicted Label')
     plt.tight_layout()
     safe_name = name.replace(" ", "_")
-    plt.savefig(f'results/{safe_name}_confusion_matrix.png', dpi=150)
+    plt.savefig(os.path.join(RESULTS_DIR, f'{safe_name}_confusion_matrix.png'), dpi=150)
     plt.close()
 
     return {
@@ -57,7 +62,7 @@ def evaluate(y_true, y_pred, y_prob, name="Model"):
 
 def plot_roc_curves(roc_data):
     plt.figure(figsize=(8, 6))
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
     for i, d in enumerate(roc_data):
         fpr, tpr, _ = roc_curve(d['y_true'], d['y_prob'])
         auc = roc_auc_score(d['y_true'], d['y_prob'])
@@ -69,9 +74,9 @@ def plot_roc_curves(roc_data):
     plt.title('ROC Curves — All Models')
     plt.legend(loc='lower right')
     plt.tight_layout()
-    plt.savefig('results/roc_curves.png', dpi=150)
+    plt.savefig(os.path.join(RESULTS_DIR, 'roc_curves.png'), dpi=150)
     plt.close()
-    print("  ✅ Saved → results/roc_curves.png")
+    logger.info(f"  ✅ Saved → {RESULTS_DIR}/roc_curves.png")
 
 
 def plot_model_comparison(results_list):
@@ -85,13 +90,13 @@ def plot_model_comparison(results_list):
     plt.xticks(rotation=20, ha='right')
     plt.legend(loc='lower right')
     plt.tight_layout()
-    plt.savefig('results/model_comparison.png', dpi=150)
+    plt.savefig(os.path.join(RESULTS_DIR, 'model_comparison.png'), dpi=150)
     plt.close()
-    print("  ✅ Saved → results/model_comparison.png")
+    logger.info(f"  ✅ Saved → {RESULTS_DIR}/model_comparison.png")
 
 
 def save_results_table(results_list):
     df = pd.DataFrame(results_list)
-    df.to_csv('results/all_results.csv', index=False)
-    print("\n  ✅ Results table saved → results/all_results.csv")
-    print(df.to_string(index=False))
+    df.to_csv(os.path.join(RESULTS_DIR, 'all_results.csv'), index=False)
+    logger.info(f"\n  ✅ Results table saved → {RESULTS_DIR}/all_results.csv")
+    logger.info(f"\n{df.to_string(index=False)}")

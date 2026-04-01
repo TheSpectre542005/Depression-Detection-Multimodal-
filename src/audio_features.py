@@ -1,10 +1,15 @@
 # src/audio_features.py
 import pandas as pd
 import numpy as np
-import os
+import os, logging
 
-DATA_ROOT = r"C:\Users\Rishil\Downloads\E-DAIC\data"
-SAVE_PATH = "data/features/audio_features.csv"
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from config import DATA_ROOT, FEATURES_DIR
+
+logger = logging.getLogger(__name__)
+
+SAVE_PATH = os.path.join(FEATURES_DIR, "audio_features.csv")
 
 def load_semicolon_csv(path):
     """Load openSMILE files which use semicolon separator."""
@@ -20,7 +25,7 @@ def load_semicolon_csv(path):
         df = df.select_dtypes(include=[np.number])
         return df
     except Exception as e:
-        print(f"    Error loading {path}: {e}")
+        logger.warning(f"Error loading {path}: {e}")
         return None
 
 def aggregate(df):
@@ -34,7 +39,7 @@ def aggregate(df):
     return np.concatenate([means, stds, mins, maxs])
 
 def build_audio_features(participant_ids):
-    print("\n🎙️  Extracting audio features...")
+    logger.info("Extracting audio features...")
     records = []
     missing = []
 
@@ -67,15 +72,16 @@ def build_audio_features(participant_ids):
         records.append(record)
 
     if missing:
-        print(f"  Missing audio features: {len(missing)} participants")
+        logger.info(f"Missing audio features: {len(missing)} participants")
 
     df = pd.DataFrame(records).fillna(0)
-    os.makedirs('data/features', exist_ok=True)
+    os.makedirs(FEATURES_DIR, exist_ok=True)
     df.to_csv(SAVE_PATH, index=False)
-    print(f"  ✅ Audio features saved → {SAVE_PATH}")
-    print(f"  Shape: {df.shape}")
+    logger.info(f"  ✅ Audio features saved → {SAVE_PATH}")
+    logger.info(f"  Shape: {df.shape}")
     return df
 
 if __name__ == "__main__":
-    labels = pd.read_csv('data/features/master_labels.csv')
+    logging.basicConfig(level=logging.INFO)
+    labels = pd.read_csv(os.path.join(FEATURES_DIR, 'master_labels.csv'))
     build_audio_features(labels['pid'].tolist())
