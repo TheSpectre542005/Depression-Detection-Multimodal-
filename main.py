@@ -7,6 +7,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.decomposition import PCA
 from sklearn.metrics import roc_auc_score, f1_score as sk_f1
 
+from config import THRESHOLD_MIN, THRESHOLD_MAX
+
 from src.load_labels     import build_master_labels
 from src.text_features   import build_text_features
 from src.audio_features_enhanced  import build_audio_features_enhanced

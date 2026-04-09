@@ -34,6 +34,8 @@ THRESHOLD_STEP = 0.01
 
 # ── Fusion settings ────────────────────────────────────────────
 MIN_AUC_FOR_FUSION = 0.52
+# Set to True when audio model validation AUC exceeds 0.60
+AUDIO_RELIABLE = os.environ.get('AUDIO_RELIABLE', 'false').lower() == 'true'
 
 # ── Flask settings ─────────────────────────────────────────────
 FLASK_DEBUG = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'

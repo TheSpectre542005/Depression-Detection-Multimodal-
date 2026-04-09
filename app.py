@@ -12,10 +12,7 @@ from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-from config import FLASK_DEBUG, FLASK_PORT, MODELS_DIR, N_TFIDF
-
-# Data quality tracking (imported from audio_features)
-data_quality_log = {'audio_unreliable': True}  # Marked unreliable until proven otherwise
+from config import FLASK_DEBUG, FLASK_PORT, MODELS_DIR, N_TFIDF, AUDIO_RELIABLE
 
 # ── Logging ────────────────────────────────────────────────────
 logging.basicConfig(
@@ -50,31 +47,10 @@ except FileNotFoundError:
     tfidf_vectorizer = None
     logger.warning("⚠️  TF-IDF vectorizer not found — text features will use zeros for TF-IDF slots")
 
-# Audio model (optional - may not be available or reliable)
-audio_model = None
-audio_scaler = None
-HAS_AUDIO_MODEL = False
-try:
-    audio_model = joblib.load(os.path.join(MODELS_DIR, 'audio_model.pkl'))
-    audio_artifacts = joblib.load(os.path.join(MODELS_DIR, 'audio_scaler.pkl'))
-    audio_scaler = audio_artifacts.get('scaler') if isinstance(audio_artifacts, dict) else audio_artifacts
-    HAS_AUDIO_MODEL = True
-    logger.info("✅ Audio model loaded (use with caution - may have data quality issues)")
-except FileNotFoundError:
-    logger.info("ℹ️  Audio model not found - audio analysis disabled")
-
-# Visual model (optional)
-visual_model = None
-visual_scaler = None
-HAS_VISUAL_MODEL = False
-try:
-    visual_model = joblib.load(os.path.join(MODELS_DIR, 'visual_model.pkl'))
-    visual_artifacts = joblib.load(os.path.join(MODELS_DIR, 'visual_scaler.pkl'))
-    visual_scaler = visual_artifacts.get('scaler') if isinstance(visual_artifacts, dict) else visual_artifacts
-    HAS_VISUAL_MODEL = True
-    logger.info("✅ Visual model loaded")
-except FileNotFoundError:
-    logger.info("ℹ️  Visual model not found - visual analysis disabled")
+# NOTE: Audio/visual models are trained on PCA-reduced OpenSMILE/CNN embeddings
+# and CANNOT be used for inference on client-provided browser features (different
+# feature space — 8 vs 40+ dimensions). Audio/visual analysis relies on
+# client-side probabilities from face-api.js and Web Audio API instead.
 
 # Text processing tools
 sid        = SentimentIntensityAnalyzer()
@@ -113,7 +89,7 @@ def extract_text_features(raw_text):
         len(set(w.lower() for w in words)) if words else 0,
         len(set(words)) / n_words if n_words else 0,
         float(np.mean([len(w) for w in words])) if words else 0,
-        0.0,  # avg_conf — not available for new text
+        0.0,  # avg_conf placeholder — training data had ASR confidence scores, unavailable at inference
     ]
 
     # TF-IDF — use the saved vectorizer if available
@@ -126,76 +102,6 @@ def extract_text_features(raw_text):
 
     return np.array(features, dtype=np.float64)
 
-
-def extract_audio_features_from_data(audio_data):
-    """
-    Extract audio features from client-provided audio metrics.
-    This is a simplified version - full implementation would process raw audio.
-    """
-    if not HAS_AUDIO_MODEL:
-        return None
-
-    try:
-        # Extract key audio features from the data
-        features = [
-            float(audio_data.get('avgEnergy', 0)),
-            float(audio_data.get('pauseRatio', 0)),
-            float(audio_data.get('speechRate', 0)),
-            float(audio_data.get('pitchMean', 0)),
-            float(audio_data.get('pitchStd', 0)),
-            float(audio_data.get('jitter', 0)),
-            float(audio_data.get('shimmer', 0)),
-            float(audio_data.get('hnr', 0)),  # Harmonics-to-noise ratio
-        ]
-
-        # Pad to expected feature size if needed
-        # The actual model expects specific features from the training pipeline
-        # This is a placeholder that would need to match the training features
-        return np.array(features, dtype=np.float64)
-
-    except Exception as e:
-        logger.error(f"Error extracting audio features: {e}")
-        return None
-
-
-def extract_visual_features_from_data(visual_data):
-    """
-    Extract visual features from client-provided facial metrics.
-    This processes face-api.js output or similar.
-    """
-    if not HAS_VISUAL_MODEL:
-        return None
-
-    try:
-        # Extract key visual features
-        features = []
-
-        # Expression probabilities (from face-api.js)
-        expressions = visual_data.get('expressions', {})
-        for expr in ['neutral', 'happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised']:
-            features.append(float(expressions.get(expr, 0)))
-
-        # Facial action units (if available)
-        aus = visual_data.get('actionUnits', {})
-        for au in ['AU01', 'AU04', 'AU06', 'AU12', 'AU15', 'AU17', 'AU20', 'AU26']:
-            features.append(float(aus.get(au, 0)))
-
-        # Head pose (if available)
-        pose = visual_data.get('headPose', {})
-        features.extend([
-            float(pose.get('pitch', 0)),
-            float(pose.get('yaw', 0)),
-            float(pose.get('roll', 0)),
-        ])
-
-        # Flat affect indicator
-        features.append(float(visual_data.get('flatAffect', 0)))
-
-        return np.array(features, dtype=np.float64)
-
-    except Exception as e:
-        logger.error(f"Error extracting visual features: {e}")
-        return None
 
 
 def phq8_severity(score):
@@ -341,41 +247,18 @@ def predict():
             'samples':          audio_data['samplesCollected'],
         }
 
-    # ── Server-side audio/visual analysis (if models available) ───
-    # Override client-provided values with server-side predictions
-    if HAS_AUDIO_MODEL and audio_data and isinstance(audio_data, dict):
-        try:
-            # Extract features from audio data and predict
-            audio_feats = extract_audio_features_from_data(audio_data)
-            if audio_feats is not None:
-                audio_scaled = audio_scaler.transform(audio_feats.reshape(1, -1))
-                audio_prob = float(audio_model.predict_proba(audio_scaled)[0][1])
-                results['audio']['server_probability'] = round(audio_prob, 4)
-        except Exception as e:
-            logger.warning(f"Audio prediction failed: {e}")
-
-    if HAS_VISUAL_MODEL and visual_data and isinstance(visual_data, dict):
-        try:
-            # Extract features from visual data and predict
-            visual_feats = extract_visual_features_from_data(visual_data)
-            if visual_feats is not None:
-                visual_scaled = visual_scaler.transform(visual_feats.reshape(1, -1))
-                visual_prob = float(visual_model.predict_proba(visual_scaled)[0][1])
-                results['visual']['server_probability'] = round(visual_prob, 4)
-        except Exception as e:
-            logger.warning(f"Visual prediction failed: {e}")
 
     # Adaptive fusion with performance-based weights
     # Higher weight for more reliable modalities
     has_visual = visual_prob is not None
-    has_audio  = audio_prob is not None and HAS_AUDIO_MODEL
+    has_audio  = audio_prob is not None  # Client-side analysis, no server model needed
 
     # Base weights (can be tuned based on validation performance)
     weights = {'phq': 0.35, 'text': 0.35, 'audio': 0.15, 'visual': 0.15}
 
     if has_visual and has_audio:
-        # All modalities available - downweight audio if unreliable
-        weights['audio'] = 0.10 if data_quality_log.get('audio_unreliable') else 0.15
+        # Downweight audio if configured as unreliable (AUDIO_RELIABLE in config.py)
+        weights['audio'] = 0.15 if AUDIO_RELIABLE else 0.10
         weights['visual'] = 0.20
         weights['phq'] = 0.30
         weights['text'] = 0.30
