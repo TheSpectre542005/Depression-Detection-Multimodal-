@@ -162,3 +162,58 @@ class TestAPIEndpoints:
         assert 'combined' in data
         assert 'phq' in data
         assert 'text' in data
+        assert 'weights' in data['combined']  # New: fusion weights included
+
+    def test_predict_with_visual(self, client):
+        rv = client.post('/api/predict',
+                         json={
+                             'phqAnswers': [2, 2, 2, 2, 2, 2, 2, 2],
+                             'interviewText': 'I have been feeling down and hopeless lately',
+                             'visualData': {
+                                 'samplesCollected': 10,
+                                 'visualProb': 0.7,
+                                 'flatAffect': 0.5,
+                                 'expressions': {'sad': 0.6, 'neutral': 0.3}
+                             }
+                         },
+                         content_type='application/json')
+        assert rv.status_code == 200
+        data = rv.get_json()
+        assert 'visual' in data
+        assert 'combined' in data
+        # Check that visual modality is included in weights
+        assert 'visual' in data['combined'].get('modalities_used', [])
+
+    def test_predict_with_audio(self, client):
+        rv = client.post('/api/predict',
+                         json={
+                             'phqAnswers': [1, 1, 1, 1, 1, 1, 1, 1],
+                             'interviewText': 'I am doing okay I guess',
+                             'audioData': {
+                                 'samplesCollected': 5,
+                                 'audioProb': 0.4,
+                                 'avgEnergy': 0.5,
+                                 'pauseRatio': 0.3,
+                                 'speechRate': 120
+                             }
+                         },
+                         content_type='application/json')
+        assert rv.status_code == 200
+        data = rv.get_json()
+        assert 'audio' in data
+        assert 'combined' in data
+
+    def test_combined_weights_sum_to_one(self, client):
+        rv = client.post('/api/predict',
+                         json={
+                             'phqAnswers': [1, 2, 1, 2, 1, 2, 1, 2],
+                             'interviewText': 'Some days are better than others',
+                             'visualData': {'samplesCollected': 5, 'visualProb': 0.5},
+                             'audioData': {'samplesCollected': 5, 'audioProb': 0.5}
+                         },
+                         content_type='application/json')
+        assert rv.status_code == 200
+        data = rv.get_json()
+        weights = data['combined']['weights']
+        total = sum(weights.values())
+        assert abs(total - 1.0) < 0.01, f"Weights sum to {total}, expected 1.0"

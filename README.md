@@ -98,15 +98,40 @@ cd Depression-Detection-Multimodal-
 pip install -r requirements.txt
 ```
 
-### Run the ML Pipeline
+### Step 1: Verify Data Availability
+
+Before training, check if E-DAIC data is properly accessible:
+
+```bash
+python diagnose_data.py
+```
+
+This will report any missing files or data quality issues.
+
+### Step 2: Run the ML Pipeline
 
 ```bash
 python main.py
 ```
 
-This trains unimodal models, performs late fusion, and saves results to `results/`.
+This trains unimodal models with cost-sensitive thresholding (weights false negatives higher), performs late fusion with dynamic weights, and saves results to `results/`.
 
-### Run the Web Application
+**New Features:**
+- **Cost-sensitive learning**: False negatives (missing depression) are weighted 5x more than false positives
+- **Dynamic fusion weights**: Based on validation AUC performance
+- **Clinical metrics**: Sensitivity, specificity, PPV, NPV
+
+### Step 3: Validate Results
+
+Check if models meet clinical thresholds:
+
+```bash
+python validate_models.py
+```
+
+Minimum acceptable thresholds: AUC > 0.70, Sensitivity > 0.70
+
+### Step 4: Run the Web Application
 
 ```bash
 python app.py
