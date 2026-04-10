@@ -88,9 +88,12 @@ class TestValidation:
 # ── Test feature extraction shape ───────────────────────────────
 class TestFeatureExtraction:
     def test_output_shape(self):
-        from app import extract_text_features
+        from app import extract_text_features, HAS_SBERT_APP
         features = extract_text_features("I feel very sad and hopeless about everything")
-        assert features.shape == (59,)
+        # 76 base features (4 sentiment + 5 linguistic + 17 clinical NLP + 50 TF-IDF)
+        # + 20 SBERT features if sentence-transformers is available
+        expected = 96 if HAS_SBERT_APP else 76
+        assert features.shape == (expected,)
         assert features.dtype == np.float64
 
     def test_sentiment_range(self):
@@ -102,9 +105,10 @@ class TestFeatureExtraction:
         assert 0 <= features[2] <= 1  # pos
 
     def test_minimum_text(self):
-        from app import extract_text_features
+        from app import extract_text_features, HAS_SBERT_APP
         features = extract_text_features("hello world test input")
-        assert len(features) == 59
+        expected = 96 if HAS_SBERT_APP else 76
+        assert len(features) == expected
 
 
 # ── Test Flask API endpoints ────────────────────────────────────

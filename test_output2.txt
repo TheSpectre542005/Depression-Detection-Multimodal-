@@ -1,0 +1,34 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.5, pytest-8.3.4, pluggy-1.5.0 -- C:\Users\Rishil\anaconda3\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Rishil\Documents\Depression_Detection\depression_project
+plugins: anyio-4.7.0
+collecting ... collected 25 items
+
+tests/test_app.py::TestPreprocess::test_basic_cleaning PASSED            [  4%]
+tests/test_app.py::TestPreprocess::test_empty_input PASSED               [  8%]
+tests/test_app.py::TestPreprocess::test_short_words_filtered PASSED      [ 12%]
+tests/test_app.py::TestPreprocess::test_lemmatization PASSED             [ 16%]
+tests/test_app.py::TestPhq8Severity::test_minimal PASSED                 [ 20%]
+tests/test_app.py::TestPhq8Severity::test_mild PASSED                    [ 24%]
+tests/test_app.py::TestPhq8Severity::test_moderate PASSED                [ 28%]
+tests/test_app.py::TestPhq8Severity::test_moderately_severe PASSED       [ 32%]
+tests/test_app.py::TestPhq8Severity::test_severe PASSED                  [ 36%]
+tests/test_app.py::TestValidation::test_valid_answers PASSED             [ 40%]
+tests/test_app.py::TestValidation::test_wrong_length PASSED              [ 44%]
+tests/test_app.py::TestValidation::test_out_of_range PASSED              [ 48%]
+tests/test_app.py::TestValidation::test_non_numeric PASSED               [ 52%]
+tests/test_app.py::TestFeatureExtraction::test_output_shape PASSED       [ 56%]
+tests/test_app.py::TestFeatureExtraction::test_sentiment_range PASSED    [ 60%]
+tests/test_app.py::TestFeatureExtraction::test_minimum_text PASSED       [ 64%]
+tests/test_app.py::TestAPIEndpoints::test_index PASSED                   [ 68%]
+tests/test_app.py::TestAPIEndpoints::test_phq_valid PASSED               [ 72%]
+tests/test_app.py::TestAPIEndpoints::test_phq_invalid PASSED             [ 76%]
+tests/test_app.py::TestAPIEndpoints::test_analyze_text_valid PASSED      [ 80%]
+tests/test_app.py::TestAPIEndpoints::test_analyze_text_too_short PASSED  [ 84%]
+tests/test_app.py::TestAPIEndpoints::test_predict_valid PASSED           [ 88%]
+tests/test_app.py::TestAPIEndpoints::test_predict_with_visual PASSED     [ 92%]
+tests/test_app.py::TestAPIEndpoints::test_predict_with_audio PASSED      [ 96%]
+tests/test_app.py::TestAPIEndpoints::test_combined_weights_sum_to_one PASSED [100%]
+
+============================= 25 passed in 7.89s ==============================

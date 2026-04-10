@@ -232,6 +232,12 @@ def analyze_text():
     text = text[:10000]
 
     features = extract_text_features(text)
+    # Handle dimension mismatch if model hasn't been retrained with new features
+    expected_features = text_scaler.n_features_in_
+    if len(features) > expected_features:
+        features = features[:expected_features]  # Truncate to match old model
+    elif len(features) < expected_features:
+        features = np.pad(features, (0, expected_features - len(features)))
     scaled   = text_scaler.transform(features.reshape(1, -1))
     prob     = float(text_model.predict_proba(scaled)[0][1])
 
@@ -274,6 +280,12 @@ def predict():
     text_prob = 0.5
     if text and isinstance(text, str) and len(text.strip()) >= 10:
         feats  = extract_text_features(text)
+        # Handle dimension mismatch if model hasn't been retrained
+        expected = text_scaler.n_features_in_
+        if len(feats) > expected:
+            feats = feats[:expected]
+        elif len(feats) < expected:
+            feats = np.pad(feats, (0, expected - len(feats)))
         scaled = text_scaler.transform(feats.reshape(1, -1))
         text_prob = float(text_model.predict_proba(scaled)[0][1])
 

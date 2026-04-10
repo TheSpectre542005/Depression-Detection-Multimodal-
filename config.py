@@ -22,7 +22,7 @@ N_TFIDF = 50
 PCA_COMPONENTS = 20
 SMOTE_K_NEIGHBORS = 3
 CV_SPLITS = 5
-CV_REPEATS = 3           # Repeated Stratified K-Fold (5×3 = 15 evaluations)
+CV_REPEATS = 1           # Fast 5-Fold Evaluation
 RANDOM_STATE = 42
 
 # ── Sentence-Transformers (optional) ───────────────────────────
@@ -37,7 +37,7 @@ NOISE_STD = 0.05              # Gaussian noise standard deviation
 AUGMENT_FACTOR = 2            # Multiply minority class by this factor
 
 # ── Regularization search grid ─────────────────────────────────
-C_GRID = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0]
+C_GRID = [0.1, 1.0]
 
 # ── Threshold tuning ───────────────────────────────────────────
 THRESHOLD_MIN = 0.25
