@@ -1,0 +1,57 @@
+﻿
+============================================================
+  Audio Model Improvement Script
+============================================================
+  Audio features : data/features/audio_features_enhanced.csv
+  Labels CSV     : data/features/master_labels.csv
+  PHQ threshold  : 10
+  Output model   : models/audio_model.pkl
+============================================================
+
+  Dataset: 219 samples | Depressed: 65 | Non-depressed: 154
+  Class ratio: 1 : 2.4
+
+  Running 5-fold cross-validation on all candidates...
+
+  Classifier                CV Accuracy (mean ▒ std)
+  ------------------------------------------------
+  LR_balanced               0.6286 ▒ 0.0361
+  LR_C1                     0.6629 ▒ 0.0661
+  SVM_balanced              0.7257 ▒ 0.0388
+  RandomForest              0.7486 ▒ 0.0492
+  GradientBoosting          0.6857 ▒ 0.0404
+  XGBoost                   0.6171 ▒ 0.0588
+  SMOTE+LR                  0.6914 ▒ 0.0836
+  SMOTE+RF                  0.7314 ▒ 0.0388
+  SMOTE+XGB                 0.6057 ▒ 0.0610
+python : Traceback (most recent call last):
+At line:1 char:1
++ python improve_audio_model.py --labels_csv 
+data/features/master_label ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (m 
+   ost recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\Users\Rishil\Documents\Depression_Detection\dep
+ression_project\improve_audio_model.py", line 378, in 
+<module>
+    main()
+    ~~~~^^
+  File "C:\Users\Rishil\Documents\Depression_Detection\dep
+ression_project\improve_audio_model.py", line 311, in main
+    print(f"\n  \u2713 Best CV model: {best_name}  
+({cv_scores[best_name]:.4f})\n")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^
+  File 
+"C:\Users\Rishil\anaconda3\Lib\encodings\cp1252.py", line 
+19, in encode
+    return 
+codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           
+~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode 
+character '\u2713' in position 4: character maps to 
+<undefined>
