@@ -45,9 +45,9 @@ from sklearn.preprocessing import StandardScaler, label_binarize
 warnings.filterwarnings("ignore")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Configuration — edit these names to match your actual file names if needed
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Configuration -- edit these names to match your actual file names if needed
+# -----------------------------------------------------------------------------
 
 MODALITY_CONFIG = {
     "Text": {
@@ -80,9 +80,9 @@ LATE_FUSION_CONFIG = {
 }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def load_labels(labels_csv: str, threshold: int = 10) -> pd.Series:
     """Load PHQ-8 labels and binarise at `threshold`."""
@@ -99,11 +99,14 @@ def load_labels(labels_csv: str, threshold: int = 10) -> pd.Series:
             f"Available columns: {list(df.columns)}"
         )
 
-    for id_col in ["Participant_ID", "participant_id", "id", "ID"]:
+    for id_col in ["pid", "Participant_ID", "participant_id", "id", "ID"]:
         if id_col in df.columns:
             df = df.set_index(id_col)
             break
 
+    # If already binary (0/1), skip threshold binarisation
+    if df[score_col].max() <= 1:
+        return df[score_col].astype(int)
     return (df[score_col] >= threshold).astype(int)
 
 
@@ -111,7 +114,7 @@ def load_features(features_path: str) -> pd.DataFrame:
     """Load a feature CSV. Assumes first column is participant ID."""
     df = pd.read_csv(features_path)
 
-    for id_col in ["Participant_ID", "participant_id", "id", "ID"]:
+    for id_col in ["pid", "Participant_ID", "participant_id", "id", "ID"]:
         if id_col in df.columns:
             df = df.set_index(id_col)
             break
@@ -160,7 +163,7 @@ def print_table(results: dict):
     """Pretty-print results as a table."""
     main_cols = ["Accuracy", "F1", "AUC-ROC", "Precision", "Sensitivity", "Specificity", "NPV"]
     header = f"{'Model':<18}" + "".join(f"{c:>14}" for c in main_cols)
-    sep = "─" * len(header)
+    sep = "-" * len(header)
 
     print("\n" + sep)
     print(header)
@@ -179,7 +182,7 @@ def plot_confusion_matrices(results: dict, y_trues: dict, y_preds: dict):
         import matplotlib.pyplot as plt
         import matplotlib.gridspec as gridspec
     except ImportError:
-        print("matplotlib not installed — skipping plots.")
+        print("matplotlib not installed -- skipping plots.")
         return
 
     n = len(results)
@@ -203,14 +206,14 @@ def plot_confusion_matrices(results: dict, y_trues: dict, y_preds: dict):
                         fontsize=13, fontweight="bold")
         plt.colorbar(im, ax=ax)
 
-    plt.suptitle("Confusion Matrices — Depression Detection Models", fontsize=13, y=1.02)
+    plt.suptitle("Confusion Matrices -- Depression Detection Models", fontsize=13, y=1.02)
     plt.tight_layout()
     plt.show()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Core evaluation functions
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def evaluate_unimodal(name: str, cfg: dict, features_dir: str, models_dir: str,
                       labels: pd.Series):
@@ -219,11 +222,11 @@ def evaluate_unimodal(name: str, cfg: dict, features_dir: str, models_dir: str,
     model_path = os.path.join(models_dir,   cfg["model_file"])
 
     if not os.path.exists(feat_path):
-        print(f"  [SKIP] {name}: features file not found → {feat_path}")
+        print(f"  [SKIP] {name}: features file not found -> {feat_path}")
         return None, None, None
 
     if not os.path.exists(model_path):
-        print(f"  [SKIP] {name}: model file not found → {model_path}")
+        print(f"  [SKIP] {name}: model file not found -> {model_path}")
         return None, None, None
 
     features = load_features(feat_path)
@@ -238,18 +241,18 @@ def evaluate_unimodal(name: str, cfg: dict, features_dir: str, models_dir: str,
         model = model_bundle
 
     # Handle dimension mismatch (e.g., if extraction updated but model was not retrained)
+    expected = None
     if hasattr(model, "n_features_in_"):
         expected = model.n_features_in_
-        if X.shape[1] > expected:
-            X = X[:, :expected]
-        elif X.shape[1] < expected:
-            X = np.pad(X, ((0, 0), (0, expected - X.shape[1])))
     elif hasattr(model, "named_steps") and "scaler" in model.named_steps:
-        # If it's a pipeline, check the first step (usually scaler)
         expected = model.named_steps["scaler"].n_features_in_
+
+    if expected is not None and X.shape[1] != expected:
+        print(f"  [DIM] {name}: CSV has {X.shape[1]} cols, model expects {expected} "
+              f"-> {'truncating' if X.shape[1] > expected else 'zero-padding'}")
         if X.shape[1] > expected:
             X = X[:, :expected]
-        elif X.shape[1] < expected:
+        else:
             X = np.pad(X, ((0, 0), (0, expected - X.shape[1])))
 
     y_prob = (model.predict_proba(X)[:, 1] if hasattr(model, "predict_proba") else None)
@@ -280,14 +283,15 @@ def evaluate_late_fusion(cfg: dict, features_dir: str, models_dir: str,
             model = model_bundle["pipeline"]
         else:
             model = model_bundle
+        exp = None
         if hasattr(model, "n_features_in_"):
-            expected = model.n_features_in_
-            if X.shape[1] > expected: X = X[:, :expected]
-            elif X.shape[1] < expected: X = np.pad(X, ((0, 0), (0, expected - X.shape[1])))
+            exp = model.n_features_in_
         elif hasattr(model, "named_steps") and "scaler" in model.named_steps:
-            expected = model.named_steps["scaler"].n_features_in_
-            if X.shape[1] > expected: X = X[:, :expected]
-            elif X.shape[1] < expected: X = np.pad(X, ((0, 0), (0, expected - X.shape[1])))
+            exp = model.named_steps["scaler"].n_features_in_
+        if exp is not None and X.shape[1] != exp:
+            print(f"  [DIM] Late Fusion ({feat_file}): {X.shape[1]} cols, model expects {exp}")
+            if X.shape[1] > exp: X = X[:, :exp]
+            else: X = np.pad(X, ((0, 0), (0, exp - X.shape[1])))
         
         loaded.append((X, y, model))
 
@@ -298,7 +302,7 @@ def evaluate_late_fusion(cfg: dict, features_dir: str, models_dir: str,
 
     for (X, y, model), w in zip(loaded, weights):
         if not np.array_equal(y, y_ref):
-            print("  [WARN] Late Fusion: participant ordering differs between modalities — skipping.")
+            print("  [WARN] Late Fusion: participant ordering differs between modalities -- skipping.")
             return None, None, None
         if hasattr(model, "predict_proba"):
             proba_stack.append(model.predict_proba(X)[:, 1] * w)
@@ -311,9 +315,9 @@ def evaluate_late_fusion(cfg: dict, features_dir: str, models_dir: str,
     return compute_metrics(y_ref, y_pred, fused_prob), y_ref, y_pred
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
@@ -335,11 +339,12 @@ def main():
                         help="Show confusion matrix plots")
     args = parser.parse_args()
 
-    # ── Locate labels CSV ──────────────────────────────────────────────────
+    # -- Locate labels CSV --------------------------------------------------
     if args.labels_csv:
         labels_csv = args.labels_csv
     else:
         candidates = [
+            os.path.join(args.features_dir, "master_labels.csv"),
             os.path.join(args.features_dir, "labels.csv"),
             os.path.join(args.features_dir, "phq_labels.csv"),
             "data/labels.csv",
@@ -354,7 +359,7 @@ def main():
             return
 
     print(f"\n{'='*60}")
-    print(f"  Depression Detection — Model Accuracy Calculator")
+    print(f"  Depression Detection -- Model Accuracy Calculator")
     print(f"{'='*60}")
     print(f"  Features dir : {args.features_dir}")
     print(f"  Models dir   : {args.models_dir}")
@@ -370,7 +375,7 @@ def main():
     y_trues  = {}
     y_preds  = {}
 
-    # ── Unimodal + Early Fusion ────────────────────────────────────────────
+    # -- Unimodal + Early Fusion --------------------------------------------
     for name, cfg in MODALITY_CONFIG.items():
         metrics, y_true, y_pred = evaluate_unimodal(
             name, cfg, args.features_dir, args.models_dir, labels
@@ -379,9 +384,9 @@ def main():
             results[name] = metrics
             y_trues[name] = y_true
             y_preds[name] = y_pred
-            print(f"  ✓ {name}")
+            print(f"  [OK] {name}")
 
-    # ── Late Fusion ────────────────────────────────────────────────────────
+    # -- Late Fusion --------------------------------------------------------
     metrics, y_true, y_pred = evaluate_late_fusion(
         LATE_FUSION_CONFIG, args.features_dir, args.models_dir, labels
     )
@@ -389,34 +394,34 @@ def main():
         results["Late Fusion"] = metrics
         y_trues["Late Fusion"] = y_true
         y_preds["Late Fusion"] = y_pred
-        print("  ✓ Late Fusion")
+        print("  [OK] Late Fusion")
 
     if not results:
         print("\n[ERROR] No models could be evaluated. "
               "Check that --features_dir and --models_dir point to the right paths.\n")
         return
 
-    # ── Print table ────────────────────────────────────────────────────────
+    # -- Print table --------------------------------------------------------
     print_table(results)
 
-    # ── Per-model classification reports ──────────────────────────────────
+    # -- Per-model classification reports ----------------------------------
     for name in results:
-        print(f"  ── {name} ──")
+        print(f"  -- {name} --")
         print(classification_report(
             y_trues[name], y_preds[name],
             target_names=["Non-Depressed", "Depressed"],
             zero_division=0,
         ))
 
-    # ── Save ───────────────────────────────────────────────────────────────
+    # -- Save ---------------------------------------------------------------
     if args.save:
         os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
         df_out = pd.DataFrame(results).T
         df_out.index.name = "Model"
         df_out.to_csv(args.output)
-        print(f"  Results saved → {args.output}\n")
+        print(f"  Results saved -> {args.output}\n")
 
-    # ── Plots ──────────────────────────────────────────────────────────────
+    # -- Plots --------------------------------------------------------------
     if args.plot:
         plot_confusion_matrices(results, y_trues, y_preds)
 

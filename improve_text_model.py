@@ -1,25 +1,22 @@
 """
-improve_audio_model.py
-======================
-Retrains the audio model with multiple fixes to push accuracy toward 70%+.
+improve_text_model.py
+=====================
+Retrains the text model -- mirrors the approach used in improve_audio_model.py.
 
-Root cause of low accuracy (0.39):
-  - High recall (0.90) + low precision (0.32) = model predicts "depressed" for almost everything
-  - This is a class imbalance + bad threshold problem
+Root cause of bad text accuracy (predicts all-depressed):
+  - Old model fitted on a mismatched feature set / threshold = 0.5 on an
+    unbalanced dataset causes it to default to always predicting the minority class.
 
 Fixes applied:
-  1. Threshold tuning        -- find the decision threshold that maximises accuracy
-  2. Class weight balancing  -- penalise majority class without over-correcting
-  3. Better classifiers      -- tries LR, SVM, Random Forest, XGBoost, GradientBoosting
-  4. Optuna hyperparameter   -- optional but recommended
-  5. Cross-validated search  -- prevents overfitting to a single split
-  6. Saves the best model    -- overwrites models/audio_model.pkl
+  1. Multi-candidate classifier search (LR, SVM, RF, GB, XGB)
+  2. SMOTE + class-weight balancing
+  3. Threshold tuning on held-out validation set
+  4. Saved as {pipeline, threshold} bundle -- compatible with calculate_accuracies.py
 
 Usage
 -----
-    python improve_audio_model.py
-    python improve_audio_model.py --labels_csv data/features/labels.csv
-    python improve_audio_model.py --tune          # enable Optuna (pip install optuna)
+    python improve_text_model.py
+    python improve_text_model.py --labels_csv data/features/master_labels.csv
 """
 
 import os
@@ -33,13 +30,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
 from sklearn.metrics import (
     accuracy_score, f1_score, roc_auc_score,
     precision_score, recall_score, classification_report,
-    confusion_matrix
 )
 from sklearn.calibration import CalibratedClassifierCV
 
@@ -49,7 +44,7 @@ try:
     HAS_IMBALANCED = True
 except ImportError:
     HAS_IMBALANCED = False
-    print("[WARN] imbalanced-learn not found. Install with: pip install imbalanced-learn")
+    print("[WARN] imbalanced-learn not found -- install with: pip install imbalanced-learn")
 
 try:
     import xgboost as xgb
@@ -62,21 +57,17 @@ warnings.filterwarnings("ignore")
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
-AUDIO_FEATURES_FILE = (
-    "data/features/audio_features_enhanced.csv"
-    if os.path.exists("data/features/audio_features_enhanced.csv")
-    else "data/features/audio_features.csv"
-)
-LABELS_CANDIDATES   = [
+TEXT_FEATURES_FILE = "data/features/text_features.csv"
+LABELS_CANDIDATES = [
     "data/features/master_labels.csv",
     "data/features/labels.csv",
     "data/features/phq_labels.csv",
     "data/labels.csv",
     "labels.csv",
 ]
-OUTPUT_MODEL_PATH   = "models/audio_model.pkl"
-PHQ_THRESHOLD       = 10
-RANDOM_STATE        = 42
+OUTPUT_MODEL_PATH = "models/text_model.pkl"
+PHQ_THRESHOLD = 10
+RANDOM_STATE = 42
 
 
 # -----------------------------------------------------------------------------
@@ -84,22 +75,33 @@ RANDOM_STATE        = 42
 # -----------------------------------------------------------------------------
 def load_labels(path, threshold=10):
     df = pd.read_csv(path)
+    # Support both pid/Participant_ID index styles and PHQ/label column names
     for col in ["PHQ_Score", "phq_score", "PHQ8_Score", "phq8_score", "label", "Label"]:
         if col in df.columns:
-            score_col = col; break
+            score_col = col
+            break
     else:
-        raise ValueError(f"No PHQ score column found in {path}. Columns: {list(df.columns)}")
+        raise ValueError(f"No PHQ/label column found in {path}. Columns: {list(df.columns)}")
+
+    # master_labels.csv uses 'pid'; others use Participant_ID
     for id_col in ["pid", "Participant_ID", "participant_id", "id", "ID"]:
         if id_col in df.columns:
-            df = df.set_index(id_col); break
-    return (df[score_col] >= threshold).astype(int)
+            df = df.set_index(id_col)
+            break
+
+    # If it's a raw PHQ score, binarise; if it's already 0/1, leave it
+    if df[score_col].max() > 1:
+        return (df[score_col] >= threshold).astype(int)
+    return df[score_col].astype(int)
 
 
 def load_features(path):
     df = pd.read_csv(path)
     for id_col in ["pid", "Participant_ID", "participant_id", "id", "ID"]:
         if id_col in df.columns:
-            df = df.set_index(id_col); break
+            df = df.set_index(id_col)
+            break
+    # Drop any label columns accidentally saved alongside features
     for col in ["PHQ_Score", "phq_score", "label", "Label", "depressed", "Depressed"]:
         if col in df.columns:
             df = df.drop(columns=[col])
@@ -110,6 +112,7 @@ def align(features, labels):
     common = features.index.intersection(labels.index)
     if len(common) == 0:
         raise ValueError("No overlapping IDs between features and labels!")
+    print(f"  Aligned on {len(common)} participants")
     return features.loc[common].values, labels.loc[common].values
 
 
@@ -131,9 +134,9 @@ def print_metrics(name, y_true, y_pred, y_prob=None):
     prec = precision_score(y_true, y_pred, zero_division=0)
     rec  = recall_score(y_true, y_pred, zero_division=0)
     auc  = roc_auc_score(y_true, y_prob) if y_prob is not None else float("nan")
-    print(f"\n  {'Model':<30} Acc     F1      Prec    Recall  AUC")
-    print(f"  {'-'*70}")
-    print(f"  {name:<30} {acc:.4f}  {f1:.4f}  {prec:.4f}  {rec:.4f}  {auc:.4f}")
+    print(f"\n  {'Model':<32} Acc     F1      Prec    Recall  AUC")
+    print(f"  {'-'*72}")
+    print(f"  {name:<32} {acc:.4f}  {f1:.4f}  {prec:.4f}  {rec:.4f}  {auc:.4f}")
 
 
 # -----------------------------------------------------------------------------
@@ -142,30 +145,37 @@ def print_metrics(name, y_true, y_pred, y_prob=None):
 def build_pipelines():
     pipes = {}
 
-    # 1. Logistic Regression -- tuned C, balanced weights
-    pipes["LR_balanced"] = Pipeline([
+    # 1. LR L1 (sparse -- good for TF-IDF)
+    pipes["LR_L1"] = Pipeline([
         ("scaler", StandardScaler()),
-        ("pca",    PCA(n_components=40, random_state=RANDOM_STATE)),
         ("clf",    LogisticRegression(
-            C=0.1, class_weight="balanced", max_iter=2000,
+            C=0.5, class_weight="balanced", max_iter=3000,
             solver="saga", penalty="l1", random_state=RANDOM_STATE
         )),
     ])
 
-    # 2. LR with different C
-    pipes["LR_C1"] = Pipeline([
+    # 2. LR L2
+    pipes["LR_L2"] = Pipeline([
         ("scaler", StandardScaler()),
-        ("pca",    PCA(n_components=40, random_state=RANDOM_STATE)),
         ("clf",    LogisticRegression(
-            C=1.0, class_weight="balanced", max_iter=2000,
+            C=1.0, class_weight="balanced", max_iter=3000,
             solver="lbfgs", random_state=RANDOM_STATE
         )),
     ])
 
-    # 3. SVM with probability calibration
-    pipes["SVM_balanced"] = Pipeline([
+    # 3. SVM linear (great for sparse/text features)
+    pipes["SVM_linear"] = Pipeline([
         ("scaler", StandardScaler()),
-        ("pca",    PCA(n_components=40, random_state=RANDOM_STATE)),
+        ("clf",    CalibratedClassifierCV(
+            SVC(kernel="linear", C=0.5,
+                class_weight="balanced", random_state=RANDOM_STATE),
+            cv=3
+        )),
+    ])
+
+    # 4. SVM RBF
+    pipes["SVM_rbf"] = Pipeline([
+        ("scaler", StandardScaler()),
         ("clf",    CalibratedClassifierCV(
             SVC(kernel="rbf", C=1.0, gamma="scale",
                 class_weight="balanced", random_state=RANDOM_STATE),
@@ -173,33 +183,31 @@ def build_pipelines():
         )),
     ])
 
-    # 4. Random Forest
+    # 5. Random Forest
     pipes["RandomForest"] = Pipeline([
         ("scaler", StandardScaler()),
         ("clf",    RandomForestClassifier(
-            n_estimators=300, max_depth=6, class_weight="balanced",
-            min_samples_leaf=3, random_state=RANDOM_STATE, n_jobs=-1
+            n_estimators=300, max_depth=8, class_weight="balanced",
+            min_samples_leaf=2, random_state=RANDOM_STATE, n_jobs=-1
         )),
     ])
 
-    # 5. Gradient Boosting
+    # 6. Gradient Boosting
     pipes["GradientBoosting"] = Pipeline([
         ("scaler", StandardScaler()),
-        ("pca",    PCA(n_components=40, random_state=RANDOM_STATE)),
         ("clf",    GradientBoostingClassifier(
             n_estimators=200, learning_rate=0.05, max_depth=3,
             subsample=0.8, random_state=RANDOM_STATE
         )),
     ])
 
-    # 6. XGBoost (if available)
+    # 7. XGBoost
     if HAS_XGB:
         pipes["XGBoost"] = Pipeline([
             ("scaler", StandardScaler()),
-            ("pca",    PCA(n_components=40, random_state=RANDOM_STATE)),
             ("clf",    xgb.XGBClassifier(
                 n_estimators=200, learning_rate=0.05, max_depth=4,
-                scale_pos_weight=2,  # handles imbalance
+                scale_pos_weight=2,
                 use_label_encoder=False, eval_metric="logloss",
                 random_state=RANDOM_STATE, verbosity=0
             )),
@@ -208,9 +216,6 @@ def build_pipelines():
     return pipes
 
 
-# -----------------------------------------------------------------------------
-# SMOTE pipelines (if imbalanced-learn available)
-# -----------------------------------------------------------------------------
 def build_smote_pipelines():
     if not HAS_IMBALANCED:
         return {}
@@ -218,10 +223,9 @@ def build_smote_pipelines():
 
     pipes["SMOTE+LR"] = ImbPipeline([
         ("scaler", StandardScaler()),
-        ("pca",    PCA(n_components=40, random_state=RANDOM_STATE)),
         ("smote",  SMOTE(random_state=RANDOM_STATE, k_neighbors=3)),
         ("clf",    LogisticRegression(
-            C=0.5, max_iter=2000, solver="lbfgs", random_state=RANDOM_STATE
+            C=0.5, max_iter=3000, solver="lbfgs", random_state=RANDOM_STATE
         )),
     ])
 
@@ -229,7 +233,7 @@ def build_smote_pipelines():
         ("scaler", StandardScaler()),
         ("smote",  SMOTE(random_state=RANDOM_STATE, k_neighbors=3)),
         ("clf",    RandomForestClassifier(
-            n_estimators=300, max_depth=6,
+            n_estimators=300, max_depth=8,
             min_samples_leaf=2, random_state=RANDOM_STATE, n_jobs=-1
         )),
     ])
@@ -237,7 +241,6 @@ def build_smote_pipelines():
     if HAS_XGB:
         pipes["SMOTE+XGB"] = ImbPipeline([
             ("scaler", StandardScaler()),
-            ("pca",    PCA(n_components=40, random_state=RANDOM_STATE)),
             ("smote",  SMOTE(random_state=RANDOM_STATE, k_neighbors=3)),
             ("clf",    xgb.XGBClassifier(
                 n_estimators=200, learning_rate=0.05, max_depth=4,
@@ -254,12 +257,10 @@ def build_smote_pipelines():
 # -----------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--audio_features", default=AUDIO_FEATURES_FILE)
-    parser.add_argument("--labels_csv",     default=None)
-    parser.add_argument("--threshold",      type=int, default=PHQ_THRESHOLD)
-    parser.add_argument("--output",         default=OUTPUT_MODEL_PATH)
-    parser.add_argument("--tune",           action="store_true",
-                        help="Run Optuna hyperparameter search (pip install optuna)")
+    parser.add_argument("--text_features", default=TEXT_FEATURES_FILE)
+    parser.add_argument("--labels_csv",    default=None)
+    parser.add_argument("--threshold",     type=int, default=PHQ_THRESHOLD)
+    parser.add_argument("--output",        default=OUTPUT_MODEL_PATH)
     args = parser.parse_args()
 
     # -- Find labels ------------------------------------------------------
@@ -270,23 +271,24 @@ def main():
         print("[ERROR] Labels CSV not found. Use --labels_csv <path>")
         return
 
-    print(f"\n{'='*60}")
-    print("  Audio Model Improvement Script")
-    print(f"{'='*60}")
-    print(f"  Audio features : {args.audio_features}")
-    print(f"  Labels CSV     : {labels_csv}")
-    print(f"  PHQ threshold  : {args.threshold}")
-    print(f"  Output model   : {args.output}")
-    print(f"{'='*60}\n")
+    print(f"\n{'='*62}")
+    print("  Text Model Improvement Script")
+    print(f"{'='*62}")
+    print(f"  Text features : {args.text_features}")
+    print(f"  Labels CSV    : {labels_csv}")
+    print(f"  PHQ threshold : {args.threshold}")
+    print(f"  Output model  : {args.output}")
+    print(f"{'='*62}\n")
 
-    # -- Load data ---------------------------------------------------------
+    # -- Load data ----------------------------------------------------------
     labels   = load_labels(labels_csv, args.threshold)
-    features = load_features(args.audio_features)
+    features = load_features(args.text_features)
     X, y     = align(features, labels)
 
     pos = y.sum(); neg = len(y) - pos
-    print(f"  Dataset: {len(y)} samples | Depressed: {pos} | Non-depressed: {neg}")
-    print(f"  Class ratio: 1 : {neg/max(pos,1):.1f}\n")
+    print(f"  Dataset: {len(y)} samples  |  Depressed: {pos}  |  Non-depressed: {neg}")
+    print(f"  Class ratio: 1 : {neg/max(pos,1):.1f}")
+    print(f"  Feature dims: {X.shape[1]}\n")
 
     # -- Train / validation split ------------------------------------------
     X_train, X_val, y_train, y_val = train_test_split(
@@ -299,7 +301,7 @@ def main():
 
     print("  Running 5-fold cross-validation on all candidates...\n")
     print(f"  {'Classifier':<25} CV Accuracy (mean +/- std)")
-    print(f"  {'-'*48}")
+    print(f"  {'-'*50}")
 
     cv_scores = {}
     for name, pipe in all_pipes.items():
@@ -309,9 +311,9 @@ def main():
         print(f"  {name:<25} {scores.mean():.4f} +/- {scores.std():.4f}")
 
     best_name = max(cv_scores, key=cv_scores.get)
-    print(f"\n  [OK] Best CV model: {best_name}  ({cv_scores[best_name]:.4f})\n")
+    print(f"\n  Best CV model: {best_name}  ({cv_scores[best_name]:.4f})\n")
 
-    # -- Retrain best model on full train set -----------------------------
+    # -- Retrain best model on full train set ------------------------------
     best_pipe = all_pipes[best_name]
     best_pipe.fit(X_train, y_train)
 
@@ -332,12 +334,11 @@ def main():
         zero_division=0
     ))
 
-    # -- Compare against original baseline --------------------------------
+    # -- Compare against baseline ------------------------------------------
     print("  -- Baseline vs Improved (validation set) --")
     print(f"  {'Metric':<15} {'Baseline':>10} {'Improved':>10}")
     print(f"  {'-'*38}")
-    baseline = {"Accuracy": 0.3939, "F1": 0.4737,
-                "Precision": 0.3214, "Recall": 0.9000, "AUC-ROC": 0.5478}
+    baseline = {"Accuracy": 0.30, "F1": 0.46, "Precision": 0.30, "Recall": 1.00, "AUC-ROC": 0.50}
     improved = {
         "Accuracy":  accuracy_score(y_val, y_pred_val),
         "F1":        f1_score(y_val, y_pred_val, zero_division=0),
@@ -347,32 +348,26 @@ def main():
     }
     for m in baseline:
         delta = improved[m] - baseline[m]
-        arrow = "^" if delta > 0 else "v"
+        arrow = "UP" if delta > 0 else "DOWN"
         print(f"  {m:<15} {baseline[m]:>10.4f} {improved[m]:>10.4f}  {arrow} {abs(delta):.4f}")
 
     # -- Save model --------------------------------------------------------
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-
-    # Wrap model + threshold together so calculate_accuracies.py works as-is
     model_bundle = {"pipeline": best_pipe, "threshold": best_threshold}
     joblib.dump(model_bundle, args.output)
 
-    # Also save a plain pipeline version for direct sklearn compatibility
     plain_path = args.output.replace(".pkl", "_plain.pkl")
     joblib.dump(best_pipe, plain_path)
 
-    print(f"\n  [OK] Improved model saved  -> {args.output}")
-    print(f"  [OK] Plain pipeline saved  -> {plain_path}")
+    print(f"\n  Improved model saved  -> {args.output}")
+    print(f"  Plain pipeline saved  -> {plain_path}")
 
-    # -- Tip if still below 0.70 -------------------------------------------
-    if improved["Accuracy"] < 0.70:
-        print("\n  [NOTE] Accuracy still below 0.70. Suggestions:")
-        print("    * Install XGBoost:          pip install xgboost")
-        print("    * Install imbalanced-learn: pip install imbalanced-learn")
-        print("    * Try Optuna tuning:        python improve_audio_model.py --tune")
-        print("    * Verify audio features -- MFCCs + eGeMAPS should give 40-248 features")
+    if improved["Accuracy"] < 0.60:
+        print("\n  [NOTE] Accuracy still below 0.60. Suggestions:")
+        print("    * The text_features.csv may be stale -- re-extract with: python main.py")
+        print("    * Try installing sentence-transformers for SBERT embeddings")
     else:
-        print(f"\n  [TARGET] Target reached! Audio accuracy = {improved['Accuracy']:.4f}")
+        print(f"\n  Target reached! Text accuracy = {improved['Accuracy']:.4f}")
 
 
 if __name__ == "__main__":
