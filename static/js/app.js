@@ -522,22 +522,35 @@ async function startMediaRecorder() {
     try {
         const stream = await getSharedAudioStream();
         recordedChunks = [];
-        mediaRecorder = new MediaRecorder(stream.clone(), { mimeType: 'audio/webm' });
+
+        // Pick the first supported mimeType (cross-browser: Chrome=webm, Firefox=ogg, Safari=mp4)
+        const mimeType = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/ogg;codecs=opus',
+            'audio/ogg',
+            'audio/mp4',
+            ''
+        ].find(t => t === '' || MediaRecorder.isTypeSupported(t));
+
+        const options = mimeType ? { mimeType } : {};
+        mediaRecorder = new MediaRecorder(stream, options);
         mediaRecorder.ondataavailable = e => {
             if (e.data.size > 0) recordedChunks.push(e.data);
         };
         mediaRecorder.onstop = () => {
             if (recordedChunks.length > 0) {
-                lastRecordingBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+                const blobType = mimeType || 'audio/webm';
+                lastRecordingBlob = new Blob(recordedChunks, { type: blobType });
                 if (lastRecordingUrl) URL.revokeObjectURL(lastRecordingUrl);
                 lastRecordingUrl = URL.createObjectURL(lastRecordingBlob);
                 const playBtn = document.getElementById('playback-btn');
                 if (playBtn) playBtn.style.display = 'flex';
             }
         };
-        mediaRecorder.start();
+        mediaRecorder.start(500); // Request data every 500ms so chunks are captured
     } catch (err) {
-        console.error('MediaRecorder error:', err);
+        console.warn('MediaRecorder unavailable:', err.message);
     }
 }
 
@@ -726,9 +739,48 @@ function stopAudioVisualizer() {
     if (waveformAnimId) { cancelAnimationFrame(waveformAnimId); waveformAnimId = null; }
     if (audioCollectIntervalId) { clearInterval(audioCollectIntervalId); audioCollectIntervalId = null; }
     micStream = null; // don't stop shared stream here
-    if (audioContext) { audioContext.close(); audioContext = null; }
+    if (audioContext) { audioContext.close(); audioContext = null; analyser = null; }
     const vis = document.getElementById('audio-visualizer');
     if (vis) vis.style.display = 'none';
+}
+
+// ── Background audio analysis — runs throughout entire interview ───
+// Collects audio features silently even when the user types instead of speaking.
+let _bgAudioCtx = null;
+let _bgAnalyser = null;
+let _bgCollectId = null;
+
+async function startBackgroundAudioAnalysis() {
+    if (_bgCollectId) return; // already running
+    try {
+        const stream = await getSharedAudioStream();
+        _bgAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const source = _bgAudioCtx.createMediaStreamSource(stream);
+        _bgAnalyser = _bgAudioCtx.createAnalyser();
+        _bgAnalyser.fftSize = 256;
+        source.connect(_bgAnalyser);
+
+        const bufLen = _bgAnalyser.frequencyBinCount;
+        const dataArr = new Uint8Array(bufLen);
+        audioLastSampleTime = Date.now();
+
+        _bgCollectId = setInterval(() => {
+            if (!_bgAnalyser) return;
+            // If the visualizer is also running (mic btn pressed), skip to avoid double-counting
+            if (audioCollectIntervalId) return;
+            _bgAnalyser.getByteFrequencyData(dataArr);
+            collectAudioFeatures(dataArr, bufLen);
+        }, 500);
+
+        console.log('[Audio] Background analysis started');
+    } catch (err) {
+        console.warn('[Audio] Background analysis unavailable:', err.message);
+    }
+}
+
+function stopBackgroundAudioAnalysis() {
+    if (_bgCollectId) { clearInterval(_bgCollectId); _bgCollectId = null; }
+    if (_bgAudioCtx) { _bgAudioCtx.close(); _bgAudioCtx = null; _bgAnalyser = null; }
 }
 
 
@@ -785,9 +837,22 @@ function startInterview() {
     const playBtn = document.getElementById('playback-btn');
     if (playBtn) playBtn.style.display = 'none';
 
+    // Reset audio analysis state for fresh session
+    audioFeatureHistory = [];
+    audioSilenceMs = 0;
+    audioSpeechMs = 0;
+    audioSpeechSegments = 0;
+    audioLastWasSilent = true;
+    audioLastSampleTime = 0;
+    if (audioCollectIntervalId) { clearInterval(audioCollectIntervalId); audioCollectIntervalId = null; }
+
     // Transfer camera from setup to interview
     transferCameraToInterview();
     renderInterviewProgress();
+
+    // Auto-start background audio analysis so data is collected even if user types
+    startBackgroundAudioAnalysis();
+
     setTimeout(() => askQuestion(0), 600);
 }
 
@@ -1118,13 +1183,17 @@ function computeVisualAnalysis() {
 async function submitForAnalysis() {
     showLoading('Analyzing your responses with AI models...');
 
-    // Stop face detection NOW — we've collected enough data
+    // Stop all background analysis
     stopFaceDetection();
+    stopBackgroundAudioAnalysis();
+    stopAudioVisualizer();
     hideMiniWebcam();
 
     const interviewText = interviewResponses.join(' ');
     const visualData = computeVisualAnalysis();
     const audioData = computeAudioAnalysis();
+
+    console.log(`[Submit] audio samples=${audioData ? audioData.samplesCollected : 0}, visual samples=${visualData ? visualData.samplesCollected : 0}`);
 
     // Stop webcam stream
     if (webcamStream) {
@@ -1329,6 +1398,7 @@ function restart() {
     hideMiniWebcam();
     stopRecording();
     stopAudioVisualizer();
+    stopBackgroundAudioAnalysis();
     releaseSharedAudioStream();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     if (webcamStream) { webcamStream.getTracks().forEach(t => t.stop()); webcamStream = null; }
