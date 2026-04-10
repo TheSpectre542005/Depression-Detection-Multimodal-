@@ -13,6 +13,9 @@ from nltk.stem import WordNetLemmatizer
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 from config import FLASK_DEBUG, FLASK_PORT, MODELS_DIR, N_TFIDF, AUDIO_RELIABLE
+from src.text_features import (DEPRESSION_WORDS, FIRST_PERSON_SINGULAR, FIRST_PERSON_PLURAL,
+                                THIRD_PERSON, ABSOLUTIST_WORDS, NEGATION_WORDS, HEDGING_WORDS,
+                                extract_clinical_nlp_features)
 
 # ── Logging ────────────────────────────────────────────────────
 logging.basicConfig(
@@ -52,6 +55,34 @@ except FileNotFoundError:
 # feature space — 8 vs 40+ dimensions). Audio/visual analysis relies on
 # client-side probabilities from face-api.js and Web Audio API instead.
 
+# Browser-compatible visual model (trained on AU→expression mapped features)
+browser_visual_model = None
+browser_visual_scaler = None
+HAS_BROWSER_VISUAL = False
+try:
+    browser_visual_model = joblib.load(os.path.join(MODELS_DIR, 'visual_browser_model.pkl'))
+    browser_visual_scaler = joblib.load(os.path.join(MODELS_DIR, 'visual_browser_scaler.pkl'))
+    HAS_BROWSER_VISUAL = True
+    logger.info("✅ Browser visual model loaded (face-api.js compatible)")
+except FileNotFoundError:
+    logger.info("ℹ️  Browser visual model not found — visual server-side prediction disabled")
+
+# Sentence-transformers (optional, for enhanced text features)
+sbert_model_app = None
+sbert_pca_app = None
+HAS_SBERT_APP = False
+try:
+    text_has_sbert = joblib.load(os.path.join(MODELS_DIR, 'text_has_sbert.pkl'))
+    if text_has_sbert:
+        from sentence_transformers import SentenceTransformer
+        from config import SBERT_MODEL_NAME
+        sbert_model_app = SentenceTransformer(SBERT_MODEL_NAME)
+        sbert_pca_app = joblib.load(os.path.join(MODELS_DIR, 'text_sbert_pca.pkl'))
+        HAS_SBERT_APP = True
+        logger.info("✅ Sentence-transformer model + PCA loaded")
+except Exception:
+    logger.info("ℹ️  SBERT not available — using base text features only")
+
 # Text processing tools
 sid        = SentimentIntensityAnalyzer()
 stop_words = set(stopwords.words('english'))
@@ -71,34 +102,69 @@ def preprocess(text):
 
 def extract_text_features(raw_text):
     """
-    Build the same 59-feature vector the model was trained on.
-    Order: sent_neg, sent_neu, sent_pos, sent_compound,
-           word_count, unique_words, lexical_div, avg_word_len, avg_conf,
-           tfidf_0 … tfidf_49
+    Build the feature vector the model was trained on.
+    76 features (base): 4 sentiment + 5 linguistic + 17 clinical NLP + 50 TF-IDF
+    96 features (with SBERT): + 20 PCA-reduced sentence embeddings
     """
     sentiment = sid.polarity_scores(raw_text)
     words = raw_text.split()
     n_words = len(words)
 
+    # ── 4 sentiment features ──
     features = [
         sentiment['neg'],
         sentiment['neu'],
         sentiment['pos'],
         sentiment['compound'],
+    ]
+
+    # ── 5 linguistic features ──
+    features.extend([
         n_words,
         len(set(w.lower() for w in words)) if words else 0,
         len(set(words)) / n_words if n_words else 0,
         float(np.mean([len(w) for w in words])) if words else 0,
         0.0,  # avg_conf placeholder — training data had ASR confidence scores, unavailable at inference
-    ]
+    ])
 
-    # TF-IDF — use the saved vectorizer if available
+    # ── 17 clinical NLP features ──
+    clinical = extract_clinical_nlp_features(raw_text)
+    features.extend([
+        clinical['dep_lexicon_count'],
+        clinical['dep_lexicon_ratio'],
+        clinical['dep_lexicon_unique'],
+        clinical['fps_ratio'],
+        clinical['fpp_ratio'],
+        clinical['tp_ratio'],
+        clinical['absolutist_count'],
+        clinical['absolutist_ratio'],
+        clinical['negation_count'],
+        clinical['negation_ratio'],
+        clinical['sent_variance'],
+        clinical['sent_range'],
+        clinical['mean_sent_len'],
+        clinical['response_brevity'],
+        clinical['question_ratio'],
+        clinical['hedging_count'],
+        clinical['hedging_ratio'],
+    ])
+
+    # ── 50 TF-IDF features ──
     if tfidf_vectorizer is not None:
         clean_text = preprocess(raw_text)
         tfidf_vector = tfidf_vectorizer.transform([clean_text]).toarray()[0]
         features.extend(tfidf_vector)
     else:
         features.extend([0.0] * N_TFIDF)
+
+    # ── 20 SBERT features (optional) ──
+    if HAS_SBERT_APP:
+        try:
+            emb = sbert_model_app.encode([raw_text])
+            reduced = sbert_pca_app.transform(emb)[0]
+            features.extend(reduced)
+        except Exception:
+            features.extend([0.0] * sbert_pca_app.n_components_)
 
     return np.array(features, dtype=np.float64)
 
@@ -231,6 +297,42 @@ def predict():
             'flatAffect':  round(float(visual_data.get('flatAffect', 0)), 4),
             'samples':     visual_data['samplesCollected'],
         }
+
+        # Server-side prediction using browser-compatible visual model
+        if HAS_BROWSER_VISUAL:
+            try:
+                expressions = visual_data.get('expressions', {})
+                expr_features = []
+                for expr in ['happy', 'sad', 'angry', 'surprised', 'fearful', 'disgusted', 'neutral']:
+                    val = float(expressions.get(expr, 0))
+                    expr_features.extend([val, 0.0, val, 0.0])  # mean, std, max, trend placeholders
+                # Add derived features
+                happy_mean = float(expressions.get('happy', 0))
+                sad_mean = float(expressions.get('sad', 0))
+                expr_features.append(float(visual_data.get('flatAffect', 0)))  # flat_affect
+                expr_features.append(sad_mean / max(happy_mean, 0.01))  # sad_happy_ratio
+                neg_mean = np.mean([float(expressions.get(e, 0)) for e in ['sad', 'angry', 'fearful', 'disgusted']])
+                pos_mean = np.mean([float(expressions.get(e, 0)) for e in ['happy', 'surprised']])
+                expr_features.append(neg_mean / max(pos_mean, 0.01))  # neg_pos_expr_ratio
+                expr_features.append(1.0 if happy_mean > 0.3 else 0.0)  # smile_frequency
+                expr_features.append(0.5)  # expression_transition_rate placeholder
+
+                feat_arr = np.array(expr_features, dtype=np.float64).reshape(1, -1)
+                # Pad/trim to match model's expected features
+                expected = browser_visual_scaler.n_features_in_
+                if feat_arr.shape[1] < expected:
+                    feat_arr = np.pad(feat_arr, ((0, 0), (0, expected - feat_arr.shape[1])))
+                elif feat_arr.shape[1] > expected:
+                    feat_arr = feat_arr[:, :expected]
+
+                feat_scaled = browser_visual_scaler.transform(feat_arr)
+                server_visual_prob = float(browser_visual_model.predict_proba(feat_scaled)[0][1])
+                # Blend client and server predictions (60% server, 40% client)
+                visual_prob = 0.6 * server_visual_prob + 0.4 * visual_prob
+                results['visual']['server_probability'] = round(server_visual_prob, 4)
+                results['visual']['probability'] = round(visual_prob, 4)
+            except Exception as e:
+                logger.warning(f"Browser visual prediction failed: {e}")
 
     # Include audio analysis if available
     audio_data = data.get('audioData', None)

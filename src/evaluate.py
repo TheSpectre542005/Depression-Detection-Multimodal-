@@ -23,6 +23,70 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 logger = logging.getLogger(__name__)
 
 
+def bootstrap_ci(y_true, y_prob, metric_fn, n_bootstrap=1000, ci_level=0.95, **kwargs):
+    """
+    Compute bootstrap confidence interval for any metric function.
+
+    Args:
+        y_true: true labels
+        y_prob: predicted probabilities (or predictions for non-prob metrics)
+        metric_fn: function(y_true, y_prob, **kwargs) → float
+        n_bootstrap: number of bootstrap samples
+        ci_level: confidence level (default 0.95)
+
+    Returns:
+        (point_estimate, lower_bound, upper_bound)
+    """
+    rng = np.random.RandomState(42)
+    n = len(y_true)
+    scores = []
+
+    point_estimate = metric_fn(y_true, y_prob, **kwargs)
+
+    for _ in range(n_bootstrap):
+        idx = rng.randint(0, n, size=n)
+        try:
+            score = metric_fn(y_true[idx], y_prob[idx], **kwargs)
+            scores.append(score)
+        except (ValueError, ZeroDivisionError):
+            continue
+
+    if not scores:
+        return point_estimate, point_estimate, point_estimate
+
+    alpha = (1 - ci_level) / 2
+    lower = float(np.percentile(scores, alpha * 100))
+    upper = float(np.percentile(scores, (1 - alpha) * 100))
+    return point_estimate, lower, upper
+
+
+def evaluate_cv(cv_results_list):
+    """
+    Aggregate results across cross-validation folds.
+
+    Args:
+        cv_results_list: list of dicts from evaluate() for each fold
+
+    Returns:
+        dict with mean ± std for each metric
+    """
+    if not cv_results_list:
+        return {}
+
+    df = pd.DataFrame(cv_results_list)
+    metrics = ['Accuracy', 'Balanced_Acc', 'F1', 'F2', 'Precision', 'Recall',
+               'AUC-ROC', 'Avg_Precision', 'Sensitivity', 'Specificity']
+
+    summary = {'Model': df['Model'].iloc[0]}
+    for m in metrics:
+        if m in df.columns:
+            vals = df[m].values
+            summary[f'{m}_mean'] = round(float(np.mean(vals)), 4)
+            summary[f'{m}_std'] = round(float(np.std(vals)), 4)
+
+    return summary
+
+
 def clinical_metrics(y_true, y_pred):
     """Compute clinically relevant metrics (sensitivity, specificity, etc.)."""
     cm = confusion_matrix(y_true, y_pred)

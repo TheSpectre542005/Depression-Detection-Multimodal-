@@ -24,12 +24,84 @@ except ImportError:
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from config import (MODELS_DIR, SMOTE_K_NEIGHBORS, CV_SPLITS, RANDOM_STATE,
-                    C_GRID, THRESHOLD_MIN, THRESHOLD_MAX, THRESHOLD_STEP)
+                    C_GRID, THRESHOLD_MIN, THRESHOLD_MAX, THRESHOLD_STEP,
+                    AUGMENT_MIXUP, AUGMENT_NOISE, MIXUP_ALPHA, NOISE_STD, AUGMENT_FACTOR)
 
 warnings.filterwarnings('ignore', category=UserWarning)
 os.makedirs(MODELS_DIR, exist_ok=True)
 
 logger = logging.getLogger(__name__)
+
+
+def mixup_augment(X, y, alpha=0.2, n_augment=None, random_state=42):
+    """
+    Mixup data augmentation — creates synthetic samples by blending pairs.
+    Particularly effective for small tabular datasets.
+
+    Args:
+        X: feature matrix
+        y: labels
+        alpha: Beta distribution parameter (smaller = closer to originals)
+        n_augment: number of augmented samples (default: len(minority_class))
+    """
+    rng = np.random.RandomState(random_state)
+    minority_mask = y == 1  # Depression is minority class
+    X_min = X[minority_mask]
+    y_min = y[minority_mask]
+
+    if len(X_min) < 2:
+        return X, y
+
+    if n_augment is None:
+        n_augment = len(X_min)
+
+    X_aug, y_aug = [], []
+    for _ in range(n_augment):
+        i, j = rng.choice(len(X_min), 2, replace=False)
+        lam = rng.beta(alpha, alpha)
+        x_new = lam * X_min[i] + (1 - lam) * X_min[j]
+        X_aug.append(x_new)
+        y_aug.append(1)
+
+    X_combined = np.vstack([X, np.array(X_aug)])
+    y_combined = np.concatenate([y, np.array(y_aug)])
+    return X_combined, y_combined
+
+
+def noise_augment(X, y, noise_std=0.05, n_augment=None, random_state=42):
+    """
+    Gaussian noise augmentation — adds small random perturbations to minority class.
+
+    Args:
+        X: feature matrix
+        y: labels
+        noise_std: standard deviation of noise (relative to feature std)
+        n_augment: number of augmented samples
+    """
+    rng = np.random.RandomState(random_state)
+    minority_mask = y == 1
+    X_min = X[minority_mask]
+
+    if len(X_min) < 1:
+        return X, y
+
+    if n_augment is None:
+        n_augment = len(X_min)
+
+    # Scale noise by feature standard deviation
+    feature_stds = np.std(X, axis=0) + 1e-10
+
+    X_aug, y_aug = [], []
+    for _ in range(n_augment):
+        idx = rng.choice(len(X_min))
+        noise = rng.normal(0, noise_std, size=X_min.shape[1]) * feature_stds
+        x_new = X_min[idx] + noise
+        X_aug.append(x_new)
+        y_aug.append(1)
+
+    X_combined = np.vstack([X, np.array(X_aug)])
+    y_combined = np.concatenate([y, np.array(y_aug)])
+    return X_combined, y_combined
 
 
 def select_features(X, y, feature_names=None, k=30):
@@ -168,11 +240,23 @@ def train_unimodal(X, y, name):
         logger.info(f"    Best model: {best_result['name']} (F1={best_result['f1_mean']:.3f})")
         best_model = best_result['model']
 
-    # Final training with best model
+    # Final training with best model + augmentation
     smote = SMOTE(random_state=RANDOM_STATE, k_neighbors=min(SMOTE_K_NEIGHBORS, sum(y==0)//2 + 1))
     X_resampled, y_resampled = smote.fit_resample(X_scaled, y)
-
     logger.info(f"    SMOTE: {len(y)} -> {len(y_resampled)} samples")
+
+    # Apply additional augmentation
+    if AUGMENT_MIXUP:
+        n_aug = int(sum(y == 1) * AUGMENT_FACTOR)
+        X_resampled, y_resampled = mixup_augment(
+            X_resampled, y_resampled, alpha=MIXUP_ALPHA, n_augment=n_aug)
+        logger.info(f"    Mixup: +{n_aug} samples → {len(y_resampled)} total")
+
+    if AUGMENT_NOISE:
+        n_aug = int(sum(y == 1) * AUGMENT_FACTOR)
+        X_resampled, y_resampled = noise_augment(
+            X_resampled, y_resampled, noise_std=NOISE_STD, n_augment=n_aug)
+        logger.info(f"    Noise: +{n_aug} samples → {len(y_resampled)} total")
 
     best_model.fit(X_resampled, y_resampled)
 
