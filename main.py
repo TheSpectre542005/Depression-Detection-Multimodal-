@@ -27,6 +27,7 @@ from sklearn.feature_selection import SelectKBest, mutual_info_classif, Variance
 from sklearn.metrics import (roc_auc_score, f1_score, accuracy_score, confusion_matrix, 
                              roc_curve, precision_recall_curve, average_precision_score, 
                              classification_report, recall_score, precision_score)
+from sklearn.calibration import calibration_curve
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.ensemble import (RandomForestClassifier, GradientBoostingClassifier, 
@@ -107,6 +108,36 @@ def plot_curves(y_true, y_probs, names, title_suffix, filename):
     plt.ylabel('True Positive Rate', fontsize=13)
     plt.title(f'ROC Curves — {title_suffix}', fontsize=15, fontweight='bold')
     plt.legend(loc='lower right', fontsize=12)
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(RESULTS_DIR, filename), dpi=150)
+    plt.close()
+
+
+def plot_calibration_curve(y_true, y_probs, filename):
+    prob_true, prob_pred = calibration_curve(y_true, y_probs, n_bins=10, strategy='quantile')
+    plt.figure(figsize=(8, 8))
+    plt.plot(prob_pred, prob_true, marker='o', linewidth=2, color='#4F8EF7')
+    plt.plot([0, 1], [0, 1], 'k--', alpha=0.6)
+    plt.xlabel('Predicted Probability', fontsize=13)
+    plt.ylabel('Observed Fraction Positive', fontsize=13)
+    plt.title('Calibration Curve — Fusion Model', fontsize=15, fontweight='bold')
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(RESULTS_DIR, filename), dpi=150)
+    plt.close()
+
+
+def plot_probability_distribution(y_true, y_probs, filename):
+    y_true = np.asarray(y_true)
+    y_probs = np.asarray(y_probs)
+    plt.figure(figsize=(10, 6))
+    sns.histplot(y_probs[y_true == 0], color='#10B981', label='Non-Depressed', kde=True, stat='density', alpha=0.45, bins=20)
+    sns.histplot(y_probs[y_true == 1], color='#EF4444', label='Depressed', kde=True, stat='density', alpha=0.45, bins=20)
+    plt.xlabel('Fusion Probability', fontsize=13)
+    plt.ylabel('Density', fontsize=13)
+    plt.title('Fusion Probability Distribution by Class', fontsize=15, fontweight='bold')
+    plt.legend(fontsize=12)
     plt.grid(alpha=0.3)
     plt.tight_layout()
     plt.savefig(os.path.join(RESULTS_DIR, filename), dpi=150)
@@ -350,6 +381,9 @@ def main():
     plt.tight_layout()
     plt.savefig(os.path.join(RESULTS_DIR, 'pr_curves_final.png'), dpi=150)
     plt.close()
+
+    plot_calibration_curve(all_y_true, all_probs_fusion, 'calibration_curve_fusion.png')
+    plot_probability_distribution(all_y_true, all_probs_fusion, 'fusion_probability_distribution.png')
     
     # Confusion Matrix (Fusion, optimal threshold)
     fusion_t = find_optimal_threshold(all_y_true, all_probs_fusion)
