@@ -33,11 +33,24 @@ app = Flask(__name__)
 # Load trained models & scalers (with error handling)
 # ---------------------------------------------------------------------------
 
-# Text model (required)
+# Text model (required) — handle both old dict format and new direct model format
+TEXT_MODEL_IS_PIPELINE = False
 try:
-    text_model  = joblib.load(os.path.join(MODELS_DIR, 'text_model.pkl'))
-    text_scaler = joblib.load(os.path.join(MODELS_DIR, 'text_scaler.pkl'))
-    logger.info("✅ Text model + scaler loaded")
+    _text_model_raw = joblib.load(os.path.join(MODELS_DIR, 'text_model.pkl'))
+    if isinstance(_text_model_raw, dict) and 'pipeline' in _text_model_raw:
+        text_model = _text_model_raw['pipeline']
+        TEXT_MODEL_IS_PIPELINE = True
+        logger.info("✅ Text model loaded (pipeline format — has built-in scaler)")
+    else:
+        text_model = _text_model_raw
+        logger.info("✅ Text model loaded (direct format)")
+
+    _text_scaler_raw = joblib.load(os.path.join(MODELS_DIR, 'text_scaler.pkl'))
+    if isinstance(_text_scaler_raw, dict) and 'scaler' in _text_scaler_raw:
+        text_scaler = _text_scaler_raw['scaler']
+    else:
+        text_scaler = _text_scaler_raw
+    logger.info(f"✅ Text scaler loaded (expects {text_scaler.n_features_in_} features)")
 except FileNotFoundError:
     logger.error("❌ Text model files not found! Run main.py to train models first.")
     sys.exit(1)
@@ -88,6 +101,29 @@ sid        = SentimentIntensityAnalyzer()
 stop_words = set(stopwords.words('english'))
 lemmatizer = WordNetLemmatizer()
 
+
+def predict_text_prob(features):
+    """
+    Get depression probability from text features.
+    Handles both pipeline models (built-in scaler) and direct models (external scaler).
+    Dynamically adapts feature dimensions to match the model.
+    """
+    if TEXT_MODEL_IS_PIPELINE:
+        # Pipeline handles its own VT → Scaler → SelectKBest → SMOTE → CLF
+        # Adapt to the pipeline's expected input dimensions
+        expected = text_model.named_steps[list(text_model.named_steps.keys())[0]].n_features_in_
+        arr = features.copy()
+        if len(arr) > expected:
+            arr = arr[:expected]
+        elif len(arr) < expected:
+            arr = np.pad(arr, (0, expected - len(arr)))
+        return float(text_model.predict_proba(arr.reshape(1, -1))[0][1])
+    else:
+        # Direct model needs external scaling
+        X = features.reshape(1, -1)
+        scaled = text_scaler.transform(X)
+        return float(text_model.predict_proba(scaled)[0][1])
+
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
@@ -102,10 +138,14 @@ def preprocess(text):
 
 def extract_text_features(raw_text):
     """
-    Build the feature vector the model was trained on.
-    76 features (base): 4 sentiment + 5 linguistic + 17 clinical NLP + 50 TF-IDF
-    96 features (with SBERT): + 20 PCA-reduced sentence embeddings
+    Build the feature vector for inference.
+    
+    Dynamically adapts to match the trained model's expected feature count.
+    Features: sentiment + linguistic + clinical NLP + TF-IDF + optional SBERT.
+    Final vector is truncated/padded to match text_scaler.n_features_in_.
     """
+    expected_features = text_scaler.n_features_in_
+    
     sentiment = sid.polarity_scores(raw_text)
     words = raw_text.split()
     n_words = len(words)
@@ -124,7 +164,7 @@ def extract_text_features(raw_text):
         len(set(w.lower() for w in words)) if words else 0,
         len(set(words)) / n_words if n_words else 0,
         float(np.mean([len(w) for w in words])) if words else 0,
-        0.0,  # avg_conf placeholder — training data had ASR confidence scores, unavailable at inference
+        0.0,  # avg_conf placeholder — training data had ASR confidence scores
     ])
 
     # ── 17 clinical NLP features ──
@@ -149,7 +189,7 @@ def extract_text_features(raw_text):
         clinical['hedging_ratio'],
     ])
 
-    # ── 50 TF-IDF features ──
+    # ── TF-IDF features ──
     if tfidf_vectorizer is not None:
         clean_text = preprocess(raw_text)
         tfidf_vector = tfidf_vectorizer.transform([clean_text]).toarray()[0]
@@ -157,7 +197,7 @@ def extract_text_features(raw_text):
     else:
         features.extend([0.0] * N_TFIDF)
 
-    # ── 20 SBERT features (optional) ──
+    # ── SBERT features (optional) ──
     if HAS_SBERT_APP:
         try:
             emb = sbert_model_app.encode([raw_text])
@@ -166,7 +206,15 @@ def extract_text_features(raw_text):
         except Exception:
             features.extend([0.0] * sbert_pca_app.n_components_)
 
-    return np.array(features, dtype=np.float64)
+    # ── Adapt to trained model's expected dimensions ──
+    feature_array = np.array(features, dtype=np.float64)
+    if len(feature_array) > expected_features:
+        feature_array = feature_array[:expected_features]
+    elif len(feature_array) < expected_features:
+        feature_array = np.pad(feature_array, (0, expected_features - len(feature_array)))
+
+    return feature_array
+
 
 
 
@@ -232,14 +280,7 @@ def analyze_text():
     text = text[:10000]
 
     features = extract_text_features(text)
-    # Handle dimension mismatch if model hasn't been retrained with new features
-    expected_features = text_scaler.n_features_in_
-    if len(features) > expected_features:
-        features = features[:expected_features]  # Truncate to match old model
-    elif len(features) < expected_features:
-        features = np.pad(features, (0, expected_features - len(features)))
-    scaled   = text_scaler.transform(features.reshape(1, -1))
-    prob     = float(text_model.predict_proba(scaled)[0][1])
+    prob     = predict_text_prob(features)
 
     sentiment = sid.polarity_scores(text)
     words     = text.split()
@@ -280,14 +321,7 @@ def predict():
     text_prob = 0.5
     if text and isinstance(text, str) and len(text.strip()) >= 10:
         feats  = extract_text_features(text)
-        # Handle dimension mismatch if model hasn't been retrained
-        expected = text_scaler.n_features_in_
-        if len(feats) > expected:
-            feats = feats[:expected]
-        elif len(feats) < expected:
-            feats = np.pad(feats, (0, expected - len(feats)))
-        scaled = text_scaler.transform(feats.reshape(1, -1))
-        text_prob = float(text_model.predict_proba(scaled)[0][1])
+        text_prob = predict_text_prob(feats)
 
     results['text'] = {
         'probability': round(text_prob, 4),
@@ -362,43 +396,49 @@ def predict():
         }
 
 
-    # Adaptive fusion with performance-based weights
-    # Higher weight for more reliable modalities
+
+    # ── Intelligent adaptive fusion ───────────────────────────
+    # Weights are proportional to modality reliability:
+    #   PHQ-8: Gold standard clinical instrument → highest base weight
+    #   Text:  ML model trained on E-DAIC → high weight, scales with text length
+    #   Visual: face-api.js expressions → moderate weight, scales with sample count
+    #   Audio:  Web Audio API features → lower weight (browser audio is noisy)
     has_visual = visual_prob is not None
-    has_audio  = audio_prob is not None  # Client-side analysis, no server model needed
+    has_audio  = audio_prob is not None
 
-    # Base weights (can be tuned based on validation performance)
-    weights = {'phq': 0.35, 'text': 0.35, 'audio': 0.15, 'visual': 0.15}
+    # Confidence-scaled weights
+    weights = {}
 
-    if has_visual and has_audio:
-        # Downweight audio if configured as unreliable (AUDIO_RELIABLE in config.py)
-        weights['audio'] = 0.15 if AUDIO_RELIABLE else 0.10
-        weights['visual'] = 0.20
-        weights['phq'] = 0.30
-        weights['text'] = 0.30
-    elif has_visual:
-        weights['visual'] = 0.30
-        weights['phq'] = 0.35
-        weights['text'] = 0.35
-    elif has_audio:
-        weights['audio'] = 0.20
-        weights['phq'] = 0.40
-        weights['text'] = 0.40
+    # PHQ-8 always included (validated clinical instrument)
+    weights['phq'] = 0.35
 
-    # Normalize weights based on available modalities
-    available = {'phq': True, 'text': True, 'visual': has_visual, 'audio': has_audio}
-    total_weight = sum(w for k, w in weights.items() if available[k])
-    weights = {k: w/total_weight for k, w in weights.items() if available[k]}
+    # Text: scale weight by input richness (more words = more signal)
+    text_word_count = len(text.split()) if text else 0
+    text_confidence = min(1.0, text_word_count / 50.0)  # Full confidence at 50+ words
+    weights['text'] = 0.30 * (0.5 + 0.5 * text_confidence)  # Range: 0.15 - 0.30
+
+    # Visual: scale by sample count and detection quality
+    if has_visual:
+        vis_samples = visual_data.get('samplesCollected', 0)
+        vis_confidence = min(1.0, vis_samples / 15.0)  # Full confidence at 15+ samples
+        weights['visual'] = 0.25 * (0.3 + 0.7 * vis_confidence)  # Range: 0.075 - 0.25
+
+    # Audio: scale by sample count, downweight if unreliable
+    if has_audio:
+        aud_samples = audio_data.get('samplesCollected', 0)
+        aud_confidence = min(1.0, aud_samples / 20.0)  # Full confidence at 20+ samples
+        base_audio_weight = 0.15 if AUDIO_RELIABLE else 0.08
+        weights['audio'] = base_audio_weight * (0.3 + 0.7 * aud_confidence)
+
+    # Normalize weights to sum to 1.0
+    total_weight = sum(weights.values())
+    weights = {k: v / total_weight for k, v in weights.items()}
 
     # Compute weighted fusion
-    combined_prob = 0
-    if 'phq' in weights:
-        combined_prob += weights['phq'] * phq_norm
-    if 'text' in weights:
-        combined_prob += weights['text'] * text_prob
-    if has_audio and 'audio' in weights:
+    combined_prob = weights.get('phq', 0) * phq_norm + weights.get('text', 0) * text_prob
+    if has_audio:
         combined_prob += weights['audio'] * audio_prob
-    if has_visual and 'visual' in weights:
+    if has_visual:
         combined_prob += weights['visual'] * visual_prob
 
     if combined_prob >= 0.6:

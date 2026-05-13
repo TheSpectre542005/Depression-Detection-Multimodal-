@@ -195,9 +195,15 @@ def calibrate_model(model, X_val, y_val):
     return calibrated
 
 
-def train_unimodal(X, y, name):
+def train_unimodal(X, y, name, save=True):
     """
     Enhanced unimodal training with model selection and ensemble approach.
+
+    Args:
+        X: feature matrix
+        y: labels
+        name: model name (used for saving)
+        save: if True, save model/scaler to disk. Set False during CV folds.
     """
     logger.info(f"Training [{name}] model...")
     logger.info(f"    Input shape: {X.shape}, Class distribution: {np.bincount(y)}")
@@ -271,17 +277,18 @@ def train_unimodal(X, y, name):
         logger.info("    Using uncalibrated probabilities")
 
     # Save model and artifacts
-    model_path = os.path.join(MODELS_DIR, f'{name}_model.pkl')
-    scaler_path = os.path.join(MODELS_DIR, f'{name}_scaler.pkl')
+    if save:
+        model_path = os.path.join(MODELS_DIR, f'{name}_model.pkl')
+        scaler_path = os.path.join(MODELS_DIR, f'{name}_scaler.pkl')
 
-    if selector is not None:
-        selector_path = os.path.join(MODELS_DIR, f'{name}_selector.pkl')
-        joblib.dump(selector, selector_path)
+        if selector is not None:
+            selector_path = os.path.join(MODELS_DIR, f'{name}_selector.pkl')
+            joblib.dump(selector, selector_path)
 
-    joblib.dump(best_model, model_path)
-    joblib.dump({'scaler': scaler, 'feature_mask': feature_mask}, scaler_path)
+        joblib.dump(best_model, model_path)
+        joblib.dump({'scaler': scaler, 'feature_mask': feature_mask}, scaler_path)
 
-    logger.info(f"    Saved -> {model_path}")
+        logger.info(f"    Saved -> {model_path}")
 
     return best_model, {'scaler': scaler, 'feature_mask': feature_mask, 'selector': selector}
 
@@ -463,3 +470,100 @@ def train_meta_learner(models_scalers, X_dict, y, cv_splits=3):
     logger.info(f"    Meta-learner coefficients: {meta_model.coef_[0]}")
 
     return meta_model
+
+
+class AttentionFusion:
+    """
+    Learns soft attention weights based on validation AUC performance.
+
+    Key idea:
+    - Compute validation AUC for each modality
+    - Weight each modality by its AUC above random chance (0.5)
+    - Low-performing modalities get near-zero weight
+    - High-performing modalities get higher weight
+
+    This automatically handles the audio problem (AUC ~0.55 → near-zero weight)
+    while properly leveraging text and visual modalities.
+    """
+
+    def __init__(self, min_auc_threshold=0.52):
+        """
+        Parameters:
+            min_auc_threshold: Modalities with AUC below this get minimum weight.
+        """
+        self.min_auc_threshold = min_auc_threshold
+        self.auc_scores = {}
+        self.weights = {}
+
+    def fit(self, probabilities_dict, y_val):
+        """
+        Learn attention weights from validation data.
+
+        Args:
+            probabilities_dict: dict mapping modality name → probability array
+            y_val: true labels array
+        """
+        from sklearn.metrics import roc_auc_score as _roc_auc
+
+        self.auc_scores = {}
+        self.weights = {}
+
+        for modality, probs in probabilities_dict.items():
+            probs = np.asarray(probs).ravel()
+            try:
+                auc = _roc_auc(y_val, probs)
+            except Exception:
+                auc = 0.5
+
+            self.auc_scores[modality] = auc
+
+            if auc > self.min_auc_threshold:
+                weight = auc - 0.5
+            else:
+                weight = 0.01  # Minimum weight for stability
+
+            self.weights[modality] = weight
+
+        # Normalize weights to sum to 1.0
+        total = sum(self.weights.values())
+        if total > 0:
+            self.weights = {k: v / total for k, v in self.weights.items()}
+        else:
+            n = len(self.weights)
+            self.weights = {k: 1.0 / n for k in self.weights}
+
+        logger.info("    AttentionFusion weights: " +
+                     ", ".join(f"{m}={w:.3f} (AUC={self.auc_scores[m]:.3f})"
+                               for m, w in self.weights.items()))
+        return self
+
+    def predict_proba(self, probabilities_dict, threshold=0.5):
+        """
+        Fuse predictions using learned attention weights.
+
+        Args:
+            probabilities_dict: dict mapping modality name → probability array
+            threshold: decision threshold
+
+        Returns:
+            (fused_probabilities, binary_predictions)
+        """
+        if not self.weights:
+            raise ValueError("Must call fit() before predict_proba()")
+
+        n = len(next(iter(probabilities_dict.values())))
+        fused_probs = np.zeros(n)
+
+        for modality, probs in probabilities_dict.items():
+            probs = np.asarray(probs).ravel()
+            weight = self.weights.get(modality, 0.0)
+            fused_probs += weight * probs
+
+        fused_probs = np.clip(fused_probs, 0, 1)
+        preds = (fused_probs >= threshold).astype(int)
+
+        return fused_probs, preds
+
+    def get_weights(self):
+        """Return copy of learned weights."""
+        return self.weights.copy()

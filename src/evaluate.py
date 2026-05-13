@@ -109,11 +109,16 @@ def clinical_metrics(y_true, y_pred):
     }
 
 
-def evaluate(y_true, y_pred, y_prob, name="Model"):
-    """Comprehensive model evaluation with clinical metrics."""
-    logger.info(f"\n{'='*50}")
-    logger.info(f"  📊 {name}")
-    logger.info(f"{'='*50}")
+def evaluate(y_true, y_pred, y_prob, name="Model", verbose=True):
+    """Comprehensive model evaluation with clinical metrics.
+    
+    Args:
+        verbose: If False, suppress logging and skip plot generation (for CV folds).
+    """
+    if verbose:
+        logger.info(f"\n{'='*50}")
+        logger.info(f"  📊 {name}")
+        logger.info(f"{'='*50}")
 
     acc = accuracy_score(y_true, y_pred)
     f1 = f1_score(y_true, y_pred, zero_division=0)
@@ -129,49 +134,52 @@ def evaluate(y_true, y_pred, y_prob, name="Model"):
     # Clinical metrics
     clinical = clinical_metrics(y_true, y_pred)
 
-    logger.info(f"  Accuracy        : {acc:.4f}")
-    logger.info(f"  Balanced Acc    : {bal_acc:.4f}")
-    logger.info(f"  F1-Score        : {f1:.4f}")
-    logger.info(f"  F2-Score        : {f2:.4f}  (favors recall)")
-    logger.info(f"  Precision       : {prec:.4f}")
-    logger.info(f"  Recall          : {rec:.4f}")
-    logger.info(f"  AUC-ROC         : {auc:.4f}")
-    logger.info(f"  Avg Precision   : {avg_prec:.4f}")
-    logger.info(f"  ─────────────────────────────────")
-    logger.info(f"  Sensitivity     : {clinical['sensitivity']:.4f}  (detect depressed)")
-    logger.info(f"  Specificity     : {clinical['specificity']:.4f}  (detect non-depressed)")
-    logger.info(f"  PPV             : {clinical['ppv']:.4f}  (precision)")
-    logger.info(f"  NPV             : {clinical['npv']:.4f}")
-    logger.info(f"\n{classification_report(y_true, y_pred, target_names=['Not Depressed','Depressed'], zero_division=0)}")
+    if verbose:
+        logger.info(f"  Accuracy        : {acc:.4f}")
+        logger.info(f"  Balanced Acc    : {bal_acc:.4f}")
+        logger.info(f"  F1-Score        : {f1:.4f}")
+        logger.info(f"  F2-Score        : {f2:.4f}  (favors recall)")
+        logger.info(f"  Precision       : {prec:.4f}")
+        logger.info(f"  Recall          : {rec:.4f}")
+        logger.info(f"  AUC-ROC         : {auc:.4f}")
+        logger.info(f"  Avg Precision   : {avg_prec:.4f}")
+        logger.info(f"  ─────────────────────────────────")
+        logger.info(f"  Sensitivity     : {clinical['sensitivity']:.4f}  (detect depressed)")
+        logger.info(f"  Specificity     : {clinical['specificity']:.4f}  (detect non-depressed)")
+        logger.info(f"  PPV             : {clinical['ppv']:.4f}  (precision)")
+        logger.info(f"  NPV             : {clinical['npv']:.4f}")
+        logger.info(f"\n{classification_report(y_true, y_pred, target_names=['Not Depressed','Depressed'], zero_division=0)}")
 
-    # Confusion Matrix
+    # Confusion Matrix — only generate plots when verbose
     cm = confusion_matrix(y_true, y_pred)
-    cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    if verbose:
+        cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
 
-    # Raw counts
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=['Not Dep.', 'Depressed'],
-                yticklabels=['Not Dep.', 'Depressed'],
-                ax=axes[0])
-    axes[0].set_title(f'{name} — Confusion Matrix (Counts)')
-    axes[0].set_ylabel('True Label')
-    axes[0].set_xlabel('Predicted Label')
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # Normalized
-    sns.heatmap(cm_norm, annot=True, fmt='.1%', cmap='Blues',
-                xticklabels=['Not Dep.', 'Depressed'],
-                yticklabels=['Not Dep.', 'Depressed'],
-                ax=axes[1])
-    axes[1].set_title(f'{name} — Confusion Matrix (Normalized)')
-    axes[1].set_ylabel('True Label')
-    axes[1].set_xlabel('Predicted Label')
+        # Raw counts
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                    xticklabels=['Not Dep.', 'Depressed'],
+                    yticklabels=['Not Dep.', 'Depressed'],
+                    ax=axes[0])
+        axes[0].set_title(f'{name} — Confusion Matrix (Counts)')
+        axes[0].set_ylabel('True Label')
+        axes[0].set_xlabel('Predicted Label')
 
-    plt.tight_layout()
-    safe_name = name.replace(" ", "_")
-    plt.savefig(os.path.join(RESULTS_DIR, f'{safe_name}_confusion_matrix.png'), dpi=150, bbox_inches='tight')
-    plt.close()
+        # Normalized
+        sns.heatmap(cm_norm, annot=True, fmt='.1%', cmap='Blues',
+                    xticklabels=['Not Dep.', 'Depressed'],
+                    yticklabels=['Not Dep.', 'Depressed'],
+                    ax=axes[1])
+        axes[1].set_title(f'{name} — Confusion Matrix (Normalized)')
+        axes[1].set_ylabel('True Label')
+        axes[1].set_xlabel('Predicted Label')
+
+        plt.tight_layout()
+        safe_name = name.replace(" ", "_")
+        plt.savefig(os.path.join(RESULTS_DIR, f'{safe_name}_confusion_matrix.png'), dpi=150, bbox_inches='tight')
+        plt.close()
 
     return {
         'Model': name,

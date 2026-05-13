@@ -88,11 +88,10 @@ class TestValidation:
 # ── Test feature extraction shape ───────────────────────────────
 class TestFeatureExtraction:
     def test_output_shape(self):
-        from app import extract_text_features, HAS_SBERT_APP
+        from app import extract_text_features, text_scaler
         features = extract_text_features("I feel very sad and hopeless about everything")
-        # 76 base features (4 sentiment + 5 linguistic + 17 clinical NLP + 50 TF-IDF)
-        # + 20 SBERT features if sentence-transformers is available
-        expected = 96 if HAS_SBERT_APP else 76
+        # Features are dynamically adapted to match the trained model
+        expected = text_scaler.n_features_in_
         assert features.shape == (expected,)
         assert features.dtype == np.float64
 
@@ -105,9 +104,9 @@ class TestFeatureExtraction:
         assert 0 <= features[2] <= 1  # pos
 
     def test_minimum_text(self):
-        from app import extract_text_features, HAS_SBERT_APP
+        from app import extract_text_features, text_scaler
         features = extract_text_features("hello world test input")
-        expected = 96 if HAS_SBERT_APP else 76
+        expected = text_scaler.n_features_in_
         assert len(features) == expected
 
 

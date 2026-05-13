@@ -5,11 +5,11 @@ import os
 # Supports environment variables for portability across systems
 DATA_ROOT = os.environ.get(
     'EDAIC_DATA_ROOT',
-    os.path.join(os.path.expanduser('~'), 'Downloads', 'E-DAIC', 'data')
+    os.path.join('C:\\Users\\Rishil\\Downloads\\E-DAIC', 'data')
 )
 LABELS_DIR = os.environ.get(
     'EDAIC_LABELS_DIR',
-    os.path.join(os.path.expanduser('~'), 'Downloads', 'E-DAIC', 'labels')
+    os.path.join('C:\\Users\\Rishil\\Downloads\\E-DAIC', 'labels')
 )
 
 # ── Output Paths ───────────────────────────────────────────────

@@ -1,4 +1,4 @@
-# 🧠 Depression Detection by Multimodal Analysis
+# 🧠 SENTIRA — Multimodal Depression Detection
 
 A multimodal machine learning system that detects depression by analyzing **text**, **speech**, and **facial expressions** from clinical interviews. Built on the E-DAIC (Extended DAIC-WOZ) dataset with a Flask web application for real-time screening.
 
@@ -11,15 +11,15 @@ A multimodal machine learning system that detects depression by analyzing **text
 
 ## 📌 Overview
 
-Depression is a major mental health disorder often underdiagnosed due to reliance on subjective self-reporting. This project builds an automated screening tool that combines three communication channels:
+Depression is a major mental health disorder often underdiagnosed due to reliance on subjective self-reporting. SENTIRA is an automated screening tool that combines three communication channels with attention-based fusion:
 
 | Modality | Features Extracted | Method |
 |----------|-------------------|--------|
-| **Text** | Sentiment (VADER), TF-IDF, linguistic markers | NLP |
-| **Audio** | MFCCs, eGeMAPS (pitch, energy, speaking rate) | OpenSMILE |
-| **Visual** | Facial Action Units, head pose, gaze | OpenFace / face-api.js |
+| **Text** | Sentiment (VADER), TF-IDF, clinical NLP markers, SBERT embeddings | NLP |
+| **Audio** | Prosodic biomarkers, compact MFCC, eGeMAPS features | OpenSMILE |
+| **Visual** | Facial Action Units, head pose, gaze, CNN features | OpenFace / face-api.js |
 
-The system uses **late fusion** to combine predictions from unimodal L1-regularized Logistic Regression models into a final depression risk score.
+The system uses **attention-based late fusion** that automatically learns modality weights from validation AUC — unreliable modalities (e.g., audio with AUC ~0.55) get near-zero weight while strong modalities dominate.
 
 ---
 
@@ -44,8 +44,8 @@ The system uses **late fusion** to combine predictions from unimodal L1-regulari
      └────────┼────────┘
               │
      ┌────────▼────────┐
-     │  Late Fusion    │        Multimodal Fusion
-     │  (Weighted Avg) │
+     │ AttentionFusion  │        Learned Weights
+     │ (AUC-weighted)   │
      └────────┬────────┘
               │
      ┌────────▼────────┐
@@ -63,14 +63,18 @@ The system uses **late fusion** to combine predictions from unimodal L1-regulari
 depression_project/
 ├── app.py                      # Flask web application
 ├── main.py                     # ML pipeline (train + evaluate)
+├── config.py                   # Centralized configuration
 ├── requirements.txt            # Python dependencies
 ├── src/
 │   ├── load_labels.py          # Load PHQ-8 labels from E-DAIC
-│   ├── text_features.py        # Text feature extraction (VADER + TF-IDF)
-│   ├── audio_features.py       # Audio feature extraction (MFCC + eGeMAPS)
-│   ├── visual_features.py      # Visual feature extraction (AUs + pose)
-│   ├── fusion.py               # Model training + late fusion
-│   └── evaluate.py             # Metrics, plots, confusion matrices
+│   ├── text_features.py        # Text features (VADER + TF-IDF + SBERT)
+│   ├── audio_features.py       # Basic audio features (MFCC + eGeMAPS)
+│   ├── audio_features_enhanced.py  # Enhanced audio (prosodic biomarkers)
+│   ├── visual_features.py      # Basic visual features (AUs + pose)
+│   ├── visual_features_enhanced.py # Enhanced visual (CNN + OpenFace)
+│   ├── visual_browser_model.py # Browser-compatible visual model
+│   ├── fusion.py               # Model training + AttentionFusion
+│   └── evaluate.py             # Metrics, plots, bootstrap CIs
 ├── models/                     # Trained .pkl model files
 ├── data/features/              # Extracted feature CSVs
 ├── results/                    # Evaluation outputs (plots, CSV)
@@ -78,7 +82,9 @@ depression_project/
 ├── static/
 │   ├── css/style.css           # Dark theme + glassmorphism
 │   └── js/app.js               # Frontend logic + face-api.js
-└── notebooks/                  # Exploratory analysis (optional)
+├── tests/test_app.py           # Unit tests
+├── validate_models.py          # Model validation script
+└── _archive/                   # Archived experimental scripts
 ```
 
 ---
@@ -98,88 +104,65 @@ cd Depression-Detection-Multimodal-
 pip install -r requirements.txt
 ```
 
-### Step 1: Verify Data Availability
-
-Before training, check if E-DAIC data is properly accessible:
-
-```bash
-python diagnose_data.py
-```
-
-This will report any missing files or data quality issues.
-
-### Step 2: Run the ML Pipeline
+### Run the ML Pipeline
 
 ```bash
 python main.py
 ```
 
-This trains unimodal models with cost-sensitive thresholding (weights false negatives higher), performs late fusion with dynamic weights, and saves results to `results/`.
+This runs:
+1. **5-Fold Stratified CV** with PCA fitted inside each fold (no leakage)
+2. **Model selection** across LR, SVM, RF, GB, XGBoost per modality
+3. **AttentionFusion** with AUC-learned weights
+4. **Holdout evaluation** with bootstrap 95% CIs
+5. **Cost-sensitive thresholding** (FN weighted 5x more than FP)
 
-**New Features:**
-- **Cost-sensitive learning**: False negatives (missing depression) are weighted 5x more than false positives
-- **Dynamic fusion weights**: Based on validation AUC performance
-- **Clinical metrics**: Sensitivity, specificity, PPV, NPV
-
-### Step 3: Validate Results
-
-Check if models meet clinical thresholds:
-
-```bash
-python validate_models.py
-```
-
-Minimum acceptable thresholds: AUC > 0.70, Sensitivity > 0.70
-
-### Step 4: Run the Web Application
+### Run the Web Application
 
 ```bash
 python app.py
 # Open http://localhost:5000
 ```
 
+### Run Tests
+
+```bash
+python -m pytest tests/ -v
+```
+
 ---
 
 ## 🌐 Web Application
 
-The Sentira web app provides a complete screening experience:
-
-### User Flow
+The SENTIRA web app provides a complete screening experience:
 
 1. **Landing Page** — Project overview and disclaimer
-2. **PHQ-8 Survey** — Standard 8-question clinical questionnaire (keyboard shortcuts: 0-3)
-3. **Virtual Assistant Interview** — AI chatbot asks 8 clinical-style questions while webcam captures facial expressions via face-api.js
-4. **Results Dashboard** — Risk gauge, PHQ-8 breakdown, text analysis with sentiment, and facial expression chart
+2. **Device Setup** — Camera and microphone verification
+3. **Virtual Interview** — AI chatbot (Mira) asks clinical questions while analyzing text, voice, and facial expressions
+4. **PHQ-8 Survey** — Standard 8-question clinical questionnaire
+5. **Results Dashboard** — Risk gauge, modality breakdown, expression chart
 
 ### Combined Risk Score
 
-The final risk score uses 3-way late fusion:
+The final risk score uses adaptive multimodal fusion:
 
-| Modality | Weight | Source |
+| Modality | Source | Weight |
 |----------|--------|--------|
-| PHQ-8 Score | 35% | Clinical questionnaire |
-| Text Analysis | 35% | Trained ML model (L1 LogReg) |
-| Facial Analysis | 30% | face-api.js expression detection |
+| PHQ-8 Score | Clinical questionnaire | Adaptive |
+| Text Analysis | Trained ML model | Adaptive |
+| Voice Analysis | Client-side audio features | Adaptive |
+| Facial Analysis | face-api.js expressions | Adaptive |
 
 ---
 
-## 📊 ML Pipeline Results
+## 📊 Key Techniques
 
-| Model | Accuracy | F1 | AUC-ROC |
-|-------|----------|-----|---------|
-| Text Only | 0.758 | 0.429 | 0.591 |
-| Audio Only | 0.394 | 0.474 | 0.548 |
-| Visual Only | 0.455 | 0.526 | 0.657 |
-| Late Fusion | 0.758 | 0.429 | 0.591 |
-| Early Fusion | 0.576 | 0.462 | 0.635 |
-
-### Key Techniques
-
-- **SMOTE** applied inside cross-validation folds (prevents data leakage)
-- **L1-regularized Logistic Regression** for built-in feature selection
-- **PCA** dimensionality reduction (248 audio → 20, 214 visual → 20)
-- **Smart fusion weights** excluding modalities with AUC ≤ 0.52
-- **Constrained thresholds** (0.25–0.65) to prevent degenerate predictions
+- **AttentionFusion** — Learns modality weights from validation AUC (replaces static weights)
+- **SMOTE + Mixup + Noise Augmentation** — Handles class imbalance
+- **PCA inside CV folds** — Prevents data leakage
+- **Cost-sensitive thresholding** — FN weighted 5x (missing depression is critical)
+- **Bootstrap CIs** — 95% confidence intervals on all metrics
+- **SBERT embeddings** — Optional sentence-transformer features for improved text AUC
 
 ---
 
@@ -201,8 +184,8 @@ This project uses the **E-DAIC (Extended DAIC-WOZ)** dataset:
 | Category | Tools |
 |----------|-------|
 | Language | Python 3.8+ |
-| ML | scikit-learn, imbalanced-learn |
-| NLP | NLTK, VADER Sentiment |
+| ML | scikit-learn, imbalanced-learn, XGBoost |
+| NLP | NLTK, VADER Sentiment, sentence-transformers |
 | Audio | OpenSMILE (pre-extracted) |
 | Visual | OpenFace (training), face-api.js (web) |
 | Web | Flask, HTML/CSS/JavaScript |

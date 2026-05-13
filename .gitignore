@@ -1,21 +1,41 @@
-# Dependencies
+# Python
 __pycache__/
 *.pyc
 *.pyo
-.env
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.env/
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# Generated outputs
+results/
+_archive/
+
+# Test outputs
+*.log
+test_output*.txt
+tests_output*.txt
+nul_out.txt
 
 # OS
-Thumbs.db
 .DS_Store
+Thumbs.db
 
-# Data (too large for GitHub)
-data/raw/
-*.wav
-*.mat
+# Pytest
+.pytest_cache/
 
-# Gemini artifacts
-.gemini/
+# Models (large binary files — uncomment to exclude from git)
+# models/*.pkl
+
+# Data (too large for git)
+# data/raw/
+# data/features/*.csv
