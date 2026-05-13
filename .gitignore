@@ -17,7 +17,6 @@ venv/
 *.swo
 
 # Generated outputs
-results/
 _archive/
 
 # Test outputs

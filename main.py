@@ -43,7 +43,7 @@ warnings.filterwarnings('ignore')
 
 # Constants
 RANDOM_STATE = 42
-RESULTS_DIR = "results_final"
+RESULTS_DIR = "results"
 MODELS_DIR = "models"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
