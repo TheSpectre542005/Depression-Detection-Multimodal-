@@ -2318,3 +2318,131 @@ body::after {
   align-items: center;
   gap: 8px;
 }
+
+/* -- Performance Table -------------------------------------------- */
+.performance-section {
+  background: var(--bg-1);
+  padding: clamp(80px, 12vw, 160px) var(--side-pad);
+}
+.performance-section .container {
+  max-width: var(--max-w);
+  margin: 0 auto;
+}
+.accuracy-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 12px;
+  margin-top: 48px;
+}
+.accuracy-table tr {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-2);
+  transition: transform 0.3s var(--ease-out);
+}
+.accuracy-table tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+  transform: scale(1.01);
+}
+.accuracy-table td {
+  padding: 24px;
+  border-top: 1px solid var(--border-2);
+  border-bottom: 1px solid var(--border-2);
+}
+.accuracy-table td:first-child { border-left: 1px solid var(--border-2); border-radius: 12px 0 0 12px; font-weight: 600; color: var(--text-1); }
+.accuracy-table td:last-child { border-right: 1px solid var(--border-2); border-radius: 0 12px 12px 0; }
+.acc-val { font-family: var(--font-mono); font-weight: 700; font-size: 1.1rem; }
+.acc-val.before { color: var(--text-4); text-decoration: line-through; margin-right: 12px; font-size: 0.9rem; }
+.acc-val.after { color: var(--accent-1); }
+
+/* -- Reliability Grid ---------------------------------------------- */
+.reliability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  margin-top: 48px;
+}
+.reliability-card {
+  padding: 32px;
+  border: 1px solid var(--border-1);
+  background: rgba(255, 255, 255, 0.01);
+  border-radius: var(--radius-lg);
+  transition: all 0.3s var(--ease-out);
+}
+.reliability-card:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--accent-1);
+}
+.reliability-card h3 { font-size: 1rem; margin-bottom: 16px; color: var(--accent-1); }
+.reliability-item { margin-bottom: 20px; }
+.reliability-item:last-child { margin-bottom: 0; }
+.reliability-label { font: 600 0.7rem var(--font-ui); text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-4); display: block; margin-bottom: 4px; }
+.reliability-text { font-size: 0.9rem; color: var(--text-2); }
+.reliability-text.risk { color: #EF4444; }
+.reliability-text.solution { color: #10B981; }
+
+/* -- Footer Watermark --------------------------------------------- */
+.footer-watermark {
+  position: absolute;
+  bottom: -40px;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 800 clamp(8rem, 20vw, 18rem) var(--font-display);
+  color: rgba(255, 255, 255, 0.03);
+  letter-spacing: -0.05em;
+  pointer-events: none;
+  z-index: 0;
+}
+
+
+/* -- Mira Preview Card -------------------------------------------- */
+.mira-preview-card {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  max-width: 400px;
+  margin: 0 auto;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.2);
+}
+.mira-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.5s var(--ease-out);
+}
+.mira-preview-card:hover .mira-avatar-img {
+  transform: scale(1.05);
+}
+.mira-tag {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(10px);
+  padding: 8px 16px;
+  border-radius: 100px;
+  border: 1px solid rgba(255,255,255,0.1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: white;
+  font: 500 0.8rem var(--font-ui);
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  background: #10B981;
+  border-radius: 50%;
+  box-shadow: 0 0 10px #10B981;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
