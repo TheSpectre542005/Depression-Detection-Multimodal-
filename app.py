@@ -33,27 +33,41 @@ app = Flask(__name__)
 # Load trained models & scalers (with error handling)
 # ---------------------------------------------------------------------------
 
-# Text model (required) — handle both old dict format and new direct model format
+# Text model (required)
+# Prefer final_text_model.pkl (best VotingClassifier ensemble from main.py)
+# which is an ImbPipeline with built-in VT → Scaler → SMOTE → Ensemble.
+# Falls back to old text_model.pkl if the final model doesn't exist.
 TEXT_MODEL_IS_PIPELINE = False
-try:
-    _text_model_raw = joblib.load(os.path.join(MODELS_DIR, 'text_model.pkl'))
-    if isinstance(_text_model_raw, dict) and 'pipeline' in _text_model_raw:
-        text_model = _text_model_raw['pipeline']
-        TEXT_MODEL_IS_PIPELINE = True
-        logger.info("✅ Text model loaded (pipeline format — has built-in scaler)")
-    else:
-        text_model = _text_model_raw
-        logger.info("✅ Text model loaded (direct format)")
+EXPECTED_TEXT_FEATURES = 96  # default: 4 sentiment + 5 linguistic + 17 clinical + 50 TF-IDF + 20 SBERT
+text_scaler = None
 
-    _text_scaler_raw = joblib.load(os.path.join(MODELS_DIR, 'text_scaler.pkl'))
-    if isinstance(_text_scaler_raw, dict) and 'scaler' in _text_scaler_raw:
-        text_scaler = _text_scaler_raw['scaler']
-    else:
-        text_scaler = _text_scaler_raw
-    logger.info(f"✅ Text scaler loaded (expects {text_scaler.n_features_in_} features)")
+try:
+    text_model = joblib.load(os.path.join(MODELS_DIR, 'final_text_model.pkl'))
+    TEXT_MODEL_IS_PIPELINE = True
+    # Get expected feature count from the first pipeline step (VarianceThreshold)
+    first_step = text_model.steps[0][1]
+    EXPECTED_TEXT_FEATURES = first_step.n_features_in_
+    logger.info(f"✅ Text model loaded: final ImbPipeline ensemble (expects {EXPECTED_TEXT_FEATURES} features)")
 except FileNotFoundError:
-    logger.error("❌ Text model files not found! Run main.py to train models first.")
-    sys.exit(1)
+    logger.warning("⚠️ final_text_model.pkl not found — falling back to text_model.pkl")
+    try:
+        _text_model_raw = joblib.load(os.path.join(MODELS_DIR, 'text_model.pkl'))
+        if isinstance(_text_model_raw, dict) and 'pipeline' in _text_model_raw:
+            text_model = _text_model_raw['pipeline']
+            TEXT_MODEL_IS_PIPELINE = True
+        else:
+            text_model = _text_model_raw
+
+        _text_scaler_raw = joblib.load(os.path.join(MODELS_DIR, 'text_scaler.pkl'))
+        if isinstance(_text_scaler_raw, dict) and 'scaler' in _text_scaler_raw:
+            text_scaler = _text_scaler_raw['scaler']
+        else:
+            text_scaler = _text_scaler_raw
+        EXPECTED_TEXT_FEATURES = text_scaler.n_features_in_
+        logger.info(f"✅ Text model loaded (fallback, expects {EXPECTED_TEXT_FEATURES} features)")
+    except FileNotFoundError:
+        logger.error("❌ No text model found! Run main.py to train models first.")
+        sys.exit(1)
 
 # TF-IDF vectorizer
 try:
@@ -105,22 +119,23 @@ lemmatizer = WordNetLemmatizer()
 def predict_text_prob(features):
     """
     Get depression probability from text features.
-    Handles both pipeline models (built-in scaler) and direct models (external scaler).
-    Dynamically adapts feature dimensions to match the model.
+
+    If using the final ImbPipeline (from main.py), the pipeline handles
+    VarianceThreshold → StandardScaler → (skip SMOTE) → VotingClassifier.
+    If using the old direct model, we apply the external scaler manually.
     """
+    arr = features.copy()
+    if len(arr) > EXPECTED_TEXT_FEATURES:
+        arr = arr[:EXPECTED_TEXT_FEATURES]
+    elif len(arr) < EXPECTED_TEXT_FEATURES:
+        arr = np.pad(arr, (0, EXPECTED_TEXT_FEATURES - len(arr)))
+
     if TEXT_MODEL_IS_PIPELINE:
-        # Pipeline handles its own VT → Scaler → SelectKBest → SMOTE → CLF
-        # Adapt to the pipeline's expected input dimensions
-        expected = text_model.named_steps[list(text_model.named_steps.keys())[0]].n_features_in_
-        arr = features.copy()
-        if len(arr) > expected:
-            arr = arr[:expected]
-        elif len(arr) < expected:
-            arr = np.pad(arr, (0, expected - len(arr)))
+        # ImbPipeline: VT → Scaler → (skip SMOTE at predict) → VotingClassifier
         return float(text_model.predict_proba(arr.reshape(1, -1))[0][1])
     else:
         # Direct model needs external scaling
-        X = features.reshape(1, -1)
+        X = arr.reshape(1, -1)
         scaled = text_scaler.transform(X)
         return float(text_model.predict_proba(scaled)[0][1])
 
@@ -144,7 +159,7 @@ def extract_text_features(raw_text):
     Features: sentiment + linguistic + clinical NLP + TF-IDF + optional SBERT.
     Final vector is truncated/padded to match text_scaler.n_features_in_.
     """
-    expected_features = text_scaler.n_features_in_
+    expected_features = EXPECTED_TEXT_FEATURES
     
     sentiment = sid.polarity_scores(raw_text)
     words = raw_text.split()
@@ -287,7 +302,7 @@ def analyze_text():
 
     return jsonify({
         'probability': round(prob, 4),
-        'prediction':  int(prob >= 0.5),
+        'prediction':  int(prob >= 0.38),
         'sentiment':   sentiment,
         'wordCount':   len(words),
         'uniqueWords': len(set(w.lower() for w in words)),
@@ -318,14 +333,14 @@ def predict():
     text      = data.get('interviewText', '')
     if isinstance(text, str):
         text = text[:10000]  # Truncate excessively long input
-    text_prob = 0.5
+    text_prob = 0.38
     if text and isinstance(text, str) and len(text.strip()) >= 10:
         feats  = extract_text_features(text)
         text_prob = predict_text_prob(feats)
 
     results['text'] = {
         'probability': round(text_prob, 4),
-        'prediction':  int(text_prob >= 0.5),
+        'prediction':  int(text_prob >= 0.38),
     }
 
     # ── Combined assessment ────────────────────────────────────
@@ -441,9 +456,9 @@ def predict():
     if has_visual:
         combined_prob += weights['visual'] * visual_prob
 
-    if combined_prob >= 0.6:
+    if combined_prob >= 0.55:
         risk = 'High'
-    elif combined_prob >= 0.4:
+    elif combined_prob >= 0.38:
         risk = 'Moderate'
     else:
         risk = 'Low'
@@ -451,7 +466,7 @@ def predict():
     results['combined'] = {
         'probability': round(combined_prob, 4),
         'riskLevel':   risk,
-        'prediction':  int(combined_prob >= 0.5),
+        'prediction':  int(combined_prob >= 0.38),
         'weights':     {k: round(v, 3) for k, v in weights.items()},
         'modalities_used': list(weights.keys()),
     }

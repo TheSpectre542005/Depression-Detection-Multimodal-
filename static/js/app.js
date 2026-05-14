@@ -1224,7 +1224,7 @@ function renderResults(data, visualData, audioData) {
     const circumference = 2 * Math.PI * 52;
     const offset = circumference * (1 - prob);
     const gaugeFill = document.getElementById('gauge-fill');
-    let strokeColor = prob >= 0.6 ? '#EF4444' : prob >= 0.4 ? '#F59E0B' : '#10B981';
+    let strokeColor = prob >= 0.55 ? '#EF4444' : prob >= 0.38 ? '#F59E0B' : '#10B981';
     gaugeFill.style.stroke = strokeColor;
     setTimeout(() => { gaugeFill.style.strokeDashoffset = offset; }, 300);
     document.getElementById('gauge-value').textContent = pct + '%';
@@ -1253,8 +1253,8 @@ function renderResults(data, visualData, audioData) {
     document.getElementById('text-prob-val').textContent = textPct + '%';
     document.getElementById('text-prob-bar').style.width = textPct + '%';
     const textBadge = document.getElementById('text-badge');
-    if (textProb >= 0.6) { textBadge.textContent = 'Elevated'; textBadge.className = 'result-badge high'; }
-    else if (textProb >= 0.4) { textBadge.textContent = 'Moderate'; textBadge.className = 'result-badge moderate'; }
+    if (textProb >= 0.55) { textBadge.textContent = 'Elevated'; textBadge.className = 'result-badge high'; }
+    else if (textProb >= 0.38) { textBadge.textContent = 'Moderate'; textBadge.className = 'result-badge moderate'; }
     else { textBadge.textContent = 'Normal'; textBadge.className = 'result-badge low'; }
     fetchSentiment();
     renderAudioResults(audioData);
@@ -1277,8 +1277,8 @@ function renderVisualResults(visualData) {
     flatVal.textContent = flatPct + '%';
     flatBar.style.width = flatPct + '%';
     const vp = visualData.visualProb;
-    if (vp >= 0.6) { badge.textContent = 'Elevated'; badge.className = 'result-badge high'; }
-    else if (vp >= 0.4) { badge.textContent = 'Moderate'; badge.className = 'result-badge moderate'; }
+    if (vp >= 0.55) { badge.textContent = 'Elevated'; badge.className = 'result-badge high'; }
+    else if (vp >= 0.38) { badge.textContent = 'Moderate'; badge.className = 'result-badge moderate'; }
     else { badge.textContent = 'Normal'; badge.className = 'result-badge low'; }
 
     const emojiMap = { neutral: '😐', happy: '😊', sad: '😢', angry: '😠', fearful: '😨', disgusted: '🤢', surprised: '😲' };
@@ -1315,8 +1315,8 @@ function renderAudioResults(audioData) {
     if (probVal) probVal.textContent = apPct + '%';
     if (probBar) probBar.style.width = apPct + '%';
 
-    if (ap >= 0.6) { badge.textContent = 'Elevated'; badge.className = 'result-badge high'; }
-    else if (ap >= 0.4) { badge.textContent = 'Moderate'; badge.className = 'result-badge moderate'; }
+    if (ap >= 0.55) { badge.textContent = 'Elevated'; badge.className = 'result-badge high'; }
+    else if (ap >= 0.38) { badge.textContent = 'Moderate'; badge.className = 'result-badge moderate'; }
     else { badge.textContent = 'Normal'; badge.className = 'result-badge low'; }
 
     // Energy (scale 0-0.3 to 0-100%)
