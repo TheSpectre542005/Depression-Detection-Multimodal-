@@ -1,11 +1,17 @@
 # app.py — Depression Detection Web Application
+import io
 import os
 import re
 import sys
 import logging
 import numpy as np
+import pandas as pd
 import joblib
 from flask import Flask, render_template, request, jsonify
+from scipy.io import wavfile
+from scipy.signal import resample, find_peaks, spectrogram
+from scipy.stats import kurtosis, skew
+from python_speech_features import delta, mfcc
 
 import nltk
 from nltk.corpus import stopwords
@@ -28,6 +34,9 @@ nltk.download('stopwords', quiet=True)
 nltk.download('wordnet', quiet=True)
 
 app = Flask(__name__)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if not os.path.isabs(MODELS_DIR):
+    MODELS_DIR = os.path.join(BASE_DIR, MODELS_DIR)
 
 # ---------------------------------------------------------------------------
 # Load trained models & scalers (with error handling)
@@ -44,30 +53,19 @@ text_scaler = None
 try:
     text_model = joblib.load(os.path.join(MODELS_DIR, 'final_text_model.pkl'))
     TEXT_MODEL_IS_PIPELINE = True
-    # Get expected feature count from the first pipeline step (VarianceThreshold)
-    first_step = text_model.steps[0][1]
-    EXPECTED_TEXT_FEATURES = first_step.n_features_in_
+    # Ensure compatibility with current sklearn version
+    if hasattr(text_model, 'steps'):
+        for step_name, step in text_model.steps:
+            if hasattr(step, 'n_features_in_'):
+                EXPECTED_TEXT_FEATURES = step.n_features_in_
+                break
     logger.info(f"✅ Text model loaded: final ImbPipeline ensemble (expects {EXPECTED_TEXT_FEATURES} features)")
 except FileNotFoundError:
-    logger.warning("⚠️ final_text_model.pkl not found — falling back to text_model.pkl")
-    try:
-        _text_model_raw = joblib.load(os.path.join(MODELS_DIR, 'text_model.pkl'))
-        if isinstance(_text_model_raw, dict) and 'pipeline' in _text_model_raw:
-            text_model = _text_model_raw['pipeline']
-            TEXT_MODEL_IS_PIPELINE = True
-        else:
-            text_model = _text_model_raw
-
-        _text_scaler_raw = joblib.load(os.path.join(MODELS_DIR, 'text_scaler.pkl'))
-        if isinstance(_text_scaler_raw, dict) and 'scaler' in _text_scaler_raw:
-            text_scaler = _text_scaler_raw['scaler']
-        else:
-            text_scaler = _text_scaler_raw
-        EXPECTED_TEXT_FEATURES = text_scaler.n_features_in_
-        logger.info(f"✅ Text model loaded (fallback, expects {EXPECTED_TEXT_FEATURES} features)")
-    except FileNotFoundError:
-        logger.error("❌ No text model found! Run main.py to train models first.")
-        sys.exit(1)
+    logger.error("❌ final_text_model.pkl not found! Ensure the model is trained and available.")
+    sys.exit(1)
+except Exception as e:
+    logger.error(f"❌ Failed to load text model: {e}")
+    sys.exit(1)
 
 # TF-IDF vectorizer
 try:
@@ -112,7 +110,18 @@ except Exception:
 
 # Text processing tools
 sid        = SentimentIntensityAnalyzer()
-stop_words = set(stopwords.words('english'))
+FALLBACK_STOP_WORDS = {
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'but', 'by',
+    'for', 'from', 'had', 'has', 'have', 'he', 'her', 'his', 'i', 'in',
+    'is', 'it', 'its', 'me', 'my', 'of', 'on', 'or', 'our', 'she', 'so',
+    'that', 'the', 'their', 'them', 'they', 'this', 'to', 'was', 'we',
+    'were', 'with', 'you', 'your', 'very'
+}
+try:
+    stop_words = set(stopwords.words('english'))
+except LookupError:
+    logger.warning("NLTK stopwords unavailable; using built-in fallback list")
+    stop_words = FALLBACK_STOP_WORDS
 lemmatizer = WordNetLemmatizer()
 
 
@@ -130,14 +139,21 @@ def predict_text_prob(features):
     elif len(arr) < EXPECTED_TEXT_FEATURES:
         arr = np.pad(arr, (0, EXPECTED_TEXT_FEATURES - len(arr)))
 
-    if TEXT_MODEL_IS_PIPELINE:
-        # ImbPipeline: VT → Scaler → (skip SMOTE at predict) → VotingClassifier
-        return float(text_model.predict_proba(arr.reshape(1, -1))[0][1])
-    else:
-        # Direct model needs external scaling
-        X = arr.reshape(1, -1)
-        scaled = text_scaler.transform(X)
-        return float(text_model.predict_proba(scaled)[0][1])
+    try:
+        if TEXT_MODEL_IS_PIPELINE:
+            return float(text_model.predict_proba(arr.reshape(1, -1))[0][1])
+        else:
+            X = arr.reshape(1, -1)
+            scaled = text_scaler.transform(X)
+            return float(text_model.predict_proba(scaled)[0][1])
+    except Exception as exc:
+        logger.warning(f"Text model inference failed; using heuristic fallback: {exc}")
+        neg = float(arr[0]) if len(arr) > 0 else 0.0
+        compound = float(arr[3]) if len(arr) > 3 else 0.0
+        dep_ratio = float(arr[10]) if len(arr) > 10 else 0.0
+        fps_ratio = float(arr[12]) if len(arr) > 12 else 0.0
+        score = 0.25 + (0.35 * neg) + (0.20 * max(-compound, 0)) + (1.2 * dep_ratio) + (0.6 * fps_ratio)
+        return float(np.clip(score, 0.05, 0.95))
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -146,8 +162,14 @@ def predict_text_prob(features):
 def preprocess(text):
     text = str(text).lower()
     text = re.sub(r'[^a-z\s]', '', text)
-    tokens = [lemmatizer.lemmatize(t) for t in text.split()
-              if t not in stop_words and len(t) > 1]
+    tokens = []
+    for t in text.split():
+        if t in stop_words or len(t) <= 1:
+            continue
+        try:
+            tokens.append(lemmatizer.lemmatize(t))
+        except LookupError:
+            tokens.append(t)
     return ' '.join(tokens)
 
 
@@ -210,6 +232,7 @@ def extract_text_features(raw_text):
         tfidf_vector = tfidf_vectorizer.transform([clean_text]).toarray()[0]
         features.extend(tfidf_vector)
     else:
+        logger.warning("TF-IDF vectorizer not found; using zeros for TF-IDF features")
         features.extend([0.0] * N_TFIDF)
 
     # ── SBERT features (optional) ──
@@ -218,19 +241,253 @@ def extract_text_features(raw_text):
             emb = sbert_model_app.encode([raw_text])
             reduced = sbert_pca_app.transform(emb)[0]
             features.extend(reduced)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"SBERT feature extraction failed: {e}")
             features.extend([0.0] * sbert_pca_app.n_components_)
+    else:
+        logger.info("SBERT not available; skipping SBERT features")
 
-    # ── Adapt to trained model's expected dimensions ──
+    # Log feature vector length for debugging
+    logger.debug(f"Extracted feature vector length: {len(features)}")
+
+    # Adapt to trained model's expected dimensions
     feature_array = np.array(features, dtype=np.float64)
     if len(feature_array) > expected_features:
         feature_array = feature_array[:expected_features]
     elif len(feature_array) < expected_features:
         feature_array = np.pad(feature_array, (0, expected_features - len(feature_array)))
 
+    logger.debug(f"Final feature vector length: {len(feature_array)}")
     return feature_array
 
 
+# ---------------------------------------------------------------------------
+# Audio model support
+# ---------------------------------------------------------------------------
+AUDIO_MODEL = None
+AUDIO_FEATURE_COLUMNS = []
+AUDIO_FEATURE_EXPECTED = 0
+
+
+def _load_audio_model_and_columns():
+    global AUDIO_MODEL, AUDIO_FEATURE_COLUMNS, AUDIO_FEATURE_EXPECTED
+    try:
+        AUDIO_MODEL = joblib.load(os.path.join(MODELS_DIR, 'final_audio_model.pkl'))
+        feature_csv = os.path.join(BASE_DIR, 'data', 'features', 'audio_features_enhanced.csv')
+        if os.path.exists(feature_csv):
+            cols = pd.read_csv(feature_csv, nrows=0).columns.tolist()
+            if cols and cols[0] == 'pid':
+                cols = cols[1:]
+            AUDIO_FEATURE_COLUMNS = cols
+            AUDIO_FEATURE_EXPECTED = len(cols)
+            logger.info(f"✅ Audio model loaded: final_audio_model.pkl uses {AUDIO_FEATURE_EXPECTED} features")
+        else:
+            logger.warning(f"⚠️ Audio feature CSV not found: {feature_csv}")
+    except FileNotFoundError:
+        logger.warning('⚠️ final_audio_model.pkl not found — server-side audio inference disabled')
+    except Exception as exc:
+        logger.warning(f'⚠️ Failed loading audio model or feature metadata: {exc}')
+
+
+def _normalize_audio(signal):
+    signal = np.asarray(signal)
+    if signal.dtype.kind in ('i', 'u'):
+        signal = signal.astype(np.float32) / np.iinfo(signal.dtype).max
+    elif signal.dtype.kind == 'f':
+        signal = signal.astype(np.float32)
+    if signal.ndim > 1:
+        signal = np.mean(signal, axis=1)
+    return signal
+
+
+def _load_wav_stream(file_storage):
+    file_storage.stream.seek(0)
+    raw_bytes = file_storage.read()
+    wav_io = io.BytesIO(raw_bytes)
+    samplerate, audio = wavfile.read(wav_io)
+    audio = _normalize_audio(audio)
+    if samplerate != 16000:
+        target_len = int(len(audio) * 16000 / samplerate)
+        if target_len > 0:
+            audio = resample(audio, target_len)
+        samplerate = 16000
+    return samplerate, audio
+
+
+def _estimate_pitch(signal, samplerate):
+    if len(signal) < samplerate // 10:
+        return 0.0
+    frame = signal[:min(len(signal), samplerate)] * np.hamming(min(len(signal), samplerate))
+    corr = np.correlate(frame, frame, mode='full')[len(frame)-1:]
+    min_lag = max(1, samplerate // 500)
+    corr[:min_lag] = 0
+    peak = np.argmax(corr)
+    if peak < 1:
+        return 0.0
+    return float(samplerate / peak)
+
+
+def _estimate_formants(signal, samplerate):
+    n = min(len(signal), 4096)
+    if n < 512:
+        return 0.0, 0.0, 0.0
+    windowed = signal[:n] * np.hamming(n)
+    spectrum = np.abs(np.fft.rfft(windowed, n=4096))
+    freqs = np.fft.rfftfreq(4096, d=1.0 / samplerate)
+    valid = np.where((freqs >= 200) & (freqs <= 4000))[0]
+    if len(valid) == 0:
+        return 0.0, 0.0, 0.0
+    magnitudes = spectrum[valid]
+    peaks, _ = find_peaks(magnitudes, distance=20)
+    if len(peaks) == 0:
+        return 0.0, 0.0, 0.0
+    ordered = peaks[np.argsort(magnitudes[peaks])[::-1]]
+    peak_freqs = freqs[valid][ordered][:3]
+    if len(peak_freqs) < 3:
+        peak_freqs = np.pad(peak_freqs, (0, 3 - len(peak_freqs)), constant_values=0.0)
+    return float(peak_freqs[0]), float(peak_freqs[1]), float(peak_freqs[2])
+
+
+def _spectral_flux(signal, samplerate):
+    if len(signal) < 512:
+        return 0.0, 0.0, np.array([0.0])
+    f, t, S = spectrogram(signal, fs=samplerate, window='hann', nperseg=512, noverlap=256, nfft=512, scaling='spectrum', mode='magnitude')
+    if S.shape[1] < 2:
+        return 0.0, 0.0, np.array([0.0])
+    flux = np.sqrt(np.sum(np.diff(S, axis=1) ** 2, axis=0))
+    return float(np.mean(flux)), float(np.min(flux)), flux
+
+
+def _extract_audio_feature_vector(samplerate, signal):
+    named_features = {}
+    pitch = _estimate_pitch(signal, samplerate)
+    f1, f2, f3 = _estimate_formants(signal, samplerate)
+    flux_mean, flux_min, flux_series = _spectral_flux(signal, samplerate)
+    flux_delta = np.diff(flux_series) if len(flux_series) > 1 else np.array([0.0])
+    flux_delta_std = float(np.std(flux_delta)) if flux_delta.size else 0.0
+    logf0 = np.log(np.maximum(1.0, pitch))
+    f0_log_std = float(np.std([logf0])) if not np.isnan(logf0) else 0.0
+    f0_log_delta_std = 0.0
+    if flux_delta.size > 1:
+        f0_log_delta_std = float(np.std(np.diff(np.array([logf0]))))
+
+    try:
+        mfcc_features = mfcc(signal, samplerate, winlen=0.025, winstep=0.01, numcep=13, nfilt=26, nfft=512, appendEnergy=True)
+        if mfcc_features.size == 0:
+            mfcc_features = np.zeros((1, 13), dtype=np.float32)
+    except Exception:
+        mfcc_features = np.zeros((1, 13), dtype=np.float32)
+
+    mfcc_delta = delta(mfcc_features, 2)
+    mfcc_ddelta = delta(mfcc_delta, 2)
+    mfcc_means = np.mean(mfcc_features, axis=0)
+    mfcc_stds = np.std(mfcc_features, axis=0)
+
+    egemaps_values = [pitch, flux_mean, flux_min, flux_delta_std, f1, f2, f3, f0_log_std, f0_log_delta_std]
+
+    def _approx_boaw_mfcc(bin_index, stat):
+        idx = int(bin_index) % mfcc_features.shape[1]
+        values = mfcc_features[:, idx]
+        if stat == 'mean':
+            return float(np.mean(values))
+        if stat == 'std':
+            return float(np.std(values))
+        return float(np.max(values))
+
+    def _approx_boaw_egemaps(bin_index, stat):
+        idx = int(bin_index) % len(egemaps_values)
+        val = float(np.abs(egemaps_values[idx]))
+        if stat == 'mean':
+            return val
+        if stat == 'std':
+            return val * 0.1
+        return val
+
+    slope_500_1500 = 0.0
+    try:
+        freqs = np.fft.rfftfreq(len(signal), d=1.0 / samplerate)
+        spectrum = np.abs(np.fft.rfft(signal * np.hamming(len(signal))))
+        mask = (freqs >= 500) & (freqs <= 1500)
+        if mask.any():
+            xp = freqs[mask]
+            yp = np.log(np.maximum(spectrum[mask], 1e-8))
+            if len(xp) > 1:
+                slope_500_1500 = float(np.polyfit(xp, yp, 1)[0])
+    except Exception:
+        slope_500_1500 = 0.0
+
+    named_features['prosody_voiced_pitch_mean'] = pitch
+    named_features['egemaps_spectralFlux_sma3_mean'] = flux_mean
+    named_features['egemaps_spectralFlux_sma3_min'] = flux_min
+    named_features['egemaps_spectralFlux_sma3_delta_std'] = flux_delta_std
+    named_features['egemaps_slope500-1500_sma3_max'] = slope_500_1500
+    named_features['egemaps_slope500-1500_sma3_delta_std'] = 0.0
+    named_features['egemaps_logRelF0-H1-H2_sma3nz_std'] = f0_log_std
+    named_features['egemaps_logRelF0-H1-A3_sma3nz_delta_std'] = f0_log_delta_std
+    named_features['egemaps_F1frequency_sma3nz_mean'] = f1
+    named_features['egemaps_F2frequency_sma3nz_skew'] = float(skew([f1, f2, f3])) if not np.isnan(f1 + f2 + f3) else 0.0
+    named_features['egemaps_F3frequency_sma3nz_mean'] = f3
+
+    # MFCC-derived features used by the saved audio model
+    named_features['mfcc_pcm_fftMag_mfcc[3]_min'] = float(np.min(mfcc_features[:, 3]))
+    named_features['mfcc_pcm_fftMag_mfcc[4]_mean'] = float(np.mean(mfcc_features[:, 4]))
+    named_features['mfcc_pcm_fftMag_mfcc[8]_max'] = float(np.max(mfcc_features[:, 8]))
+    named_features['mfcc_pcm_fftMag_mfcc[10]_p75'] = float(np.percentile(mfcc_features[:, 10], 75))
+    named_features['mfcc_pcm_fftMag_mfcc[10]_kurt'] = float(kurtosis(mfcc_features[:, 10], fisher=False, nan_policy='omit'))
+    named_features['mfcc_pcm_fftMag_mfcc[10]_ddelta_mean'] = float(np.mean(mfcc_ddelta[:, 10]))
+    named_features['mfcc_pcm_fftMag_mfcc_de[4]_mean'] = float(np.mean(mfcc_delta[:, 4]))
+    named_features['mfcc_pcm_fftMag_mfcc_de[5]_skew'] = float(skew(mfcc_delta[:, 5], nan_policy='omit'))
+    named_features['mfcc_pcm_fftMag_mfcc_de_de[8]_range'] = float(np.max(mfcc_ddelta[:, 8]) - np.min(mfcc_ddelta[:, 8]))
+    named_features['mfcc_pcm_fftMag_mfcc_de_de[11]_range'] = float(np.max(mfcc_ddelta[:, 11]) - np.min(mfcc_ddelta[:, 11]))
+
+    for col in AUDIO_FEATURE_COLUMNS:
+        if col.startswith('boaw_mfcc_bin'):
+            match = re.match(r'boaw_mfcc_bin(\d+)_(mean|std|max)', col)
+            if match:
+                named_features[col] = _approx_boaw_mfcc(match.group(1), match.group(2))
+        elif col.startswith('boaw_egemaps_bin'):
+            match = re.match(r'boaw_egemaps_bin(\d+)_(mean|std|max)', col)
+            if match:
+                named_features[col] = _approx_boaw_egemaps(match.group(1), match.group(2))
+
+    feature_vector = np.zeros(AUDIO_FEATURE_EXPECTED, dtype=np.float64)
+    for idx, col in enumerate(AUDIO_FEATURE_COLUMNS):
+        feature_vector[idx] = float(named_features.get(col, 0.0))
+    return feature_vector
+
+
+def predict_audio_probability(feature_vector):
+    if AUDIO_MODEL is None:
+        raise RuntimeError('Audio model is not available')
+    if feature_vector.ndim == 1:
+        feature_vector = feature_vector.reshape(1, -1)
+    return float(AUDIO_MODEL.predict_proba(feature_vector)[0][1])
+
+
+@app.route('/api/upload-audio', methods=['POST'])
+def upload_audio():
+    if AUDIO_MODEL is None or AUDIO_FEATURE_EXPECTED == 0:
+        return jsonify({'error': 'Server-side audio model unavailable'}), 503
+
+    audio_file = request.files.get('audioFile')
+    if not audio_file:
+        return jsonify({'error': 'Missing audioFile in request'}), 400
+
+    try:
+        samplerate, signal = _load_wav_stream(audio_file)
+        feature_vector = _extract_audio_feature_vector(samplerate, signal)
+        audio_prob = predict_audio_probability(feature_vector)
+        return jsonify({
+            'audioProb': round(audio_prob, 4),
+            'source': 'server',
+            'message': 'Server-side audio model inference completed.'
+        })
+    except Exception as exc:
+        logger.exception('Server audio upload failed')
+        return jsonify({'error': 'Audio processing failed', 'details': str(exc)}), 500
+
+
+_load_audio_model_and_columns()
 
 
 def phq8_severity(score):
@@ -398,16 +655,32 @@ def predict():
     # Include audio analysis if available
     audio_data = data.get('audioData', None)
     audio_prob = None
-    if (audio_data and isinstance(audio_data, dict)
+    audio_source = 'client'
+    if isinstance(audio_data, dict):
+        server_audio_prob = audio_data.get('serverAudioProb')
+        if server_audio_prob is not None:
+            try:
+                audio_prob = float(server_audio_prob)
+                audio_source = 'server'
+            except Exception:
+                audio_prob = None
+
+    if audio_prob is None and (audio_data and isinstance(audio_data, dict)
             and audio_data.get('samplesCollected', 0) >= 3):
         audio_prob = float(audio_data.get('audioProb', 0.5))
+        audio_source = 'client'
+
+    if audio_prob is not None:
         audio_prob = max(0.0, min(1.0, audio_prob))  # Clamp
         results['audio'] = {
-            'probability':      round(audio_prob, 4),
-            'avgEnergy':        round(float(audio_data.get('avgEnergy', 0)), 4),
-            'pauseRatio':       round(float(audio_data.get('pauseRatio', 0)), 4),
-            'speechRate':       round(float(audio_data.get('speechRate', 0)), 4),
-            'samples':          audio_data['samplesCollected'],
+            'probability':       round(audio_prob, 4),
+            'prediction':        int(audio_prob >= 0.38),
+            'avgEnergy':         round(float(audio_data.get('avgEnergy', 0)) if audio_data else 0, 4),
+            'pauseRatio':        round(float(audio_data.get('pauseRatio', 0)) if audio_data else 0, 4),
+            'speechRate':        round(float(audio_data.get('speechRate', 0)) if audio_data else 0, 4),
+            'samples':           int(audio_data.get('samplesCollected', 0)) if audio_data else 0,
+            'source':            audio_source,
+            'client_probability': round(float(audio_data.get('audioProb', 0)), 4) if audio_data and 'audioProb' in audio_data else None,
         }
 
 

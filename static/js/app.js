@@ -573,6 +573,76 @@ function playbackRecording() {
     };
 }
 
+async function convertRecordedBlobToWav(blob) {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const arrayBuffer = await blob.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    const numChannels = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const length = audioBuffer.length;
+    const interleaved = new Float32Array(length);
+    for (let channel = 0; channel < numChannels; channel++) {
+        const channelData = audioBuffer.getChannelData(channel);
+        for (let i = 0; i < length; i++) {
+            interleaved[i] += channelData[i];
+        }
+    }
+    for (let i = 0; i < length; i++) {
+        interleaved[i] /= numChannels;
+    }
+
+    const buffer = new ArrayBuffer(44 + interleaved.length * 2);
+    const view = new DataView(buffer);
+
+    function writeString(view, offset, string) {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+        }
+    }
+
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + interleaved.length * 2, true);
+    writeString(view, 8, 'WAVE');
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(view, 36, 'data');
+    view.setUint32(40, interleaved.length * 2, true);
+
+    let offset = 44;
+    for (let i = 0; i < interleaved.length; i++, offset += 2) {
+        const s = Math.max(-1, Math.min(1, interleaved[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+
+    audioContext.close();
+    return new Blob([view], { type: 'audio/wav' });
+}
+
+async function uploadAudioForPrediction() {
+    if (!lastRecordingBlob) {
+        throw new Error('No audio recording available to upload');
+    }
+    const wavBlob = await convertRecordedBlobToWav(lastRecordingBlob);
+    const formData = new FormData();
+    formData.append('audioFile', wavBlob, 'recording.wav');
+
+    const response = await fetch('/api/upload-audio', {
+        method: 'POST',
+        body: formData,
+    });
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || 'Server audio upload failed');
+    }
+    return response.json();
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 //  AUDIO WAVEFORM VISUALIZER
@@ -1202,6 +1272,26 @@ async function submitForAnalysis() {
     }
 
     try {
+        let serverAudioProb = null;
+        if (lastRecordingBlob) {
+            try {
+                const uploadResult = await uploadAudioForPrediction();
+                serverAudioProb = uploadResult.audioProb;
+                if (typeof serverAudioProb === 'number') {
+                    showToast(`Server audio analysis uploaded (${Math.round(serverAudioProb * 100)}%)`, 'success', 3000);
+                }
+            } catch (err) {
+                console.warn('Server audio upload failed:', err);
+            }
+        }
+
+        if (!audioData) {
+            audioData = {};
+        }
+        if (serverAudioProb !== null) {
+            audioData.serverAudioProb = serverAudioProb;
+        }
+
         const response = await fetch('/api/predict', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1334,6 +1424,10 @@ function renderAudioResults(audioData) {
 
     if (note) {
         note.textContent = `Based on ${audioData.samplesCollected} audio samples over ${audioData.totalTimeSec.toFixed(0)}s of recording.`;
+        const serverAudioProb = Number(audioData.serverAudioProb);
+        if (!Number.isNaN(serverAudioProb)) {
+            note.textContent += ` Server-side analysis returned ${Math.round(serverAudioProb * 100)}%.`;
+        }
     }
 }
 

@@ -18,6 +18,7 @@ xgboost==1.7.5
 # NLP
 nltk==3.8.1
 vaderSentiment==3.3.2
+python_speech_features==0.6
 
 # Sentence Embeddings
 sentence-transformers==2.2.2

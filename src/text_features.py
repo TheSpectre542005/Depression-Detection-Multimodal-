@@ -43,7 +43,18 @@ except ImportError:
 
 SAVE_PATH = os.path.join(FEATURES_DIR, "text_features.csv")
 
-stop_words = set(stopwords.words('english'))
+FALLBACK_STOP_WORDS = {
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'but', 'by',
+    'for', 'from', 'had', 'has', 'have', 'he', 'her', 'his', 'i', 'in',
+    'is', 'it', 'its', 'me', 'my', 'of', 'on', 'or', 'our', 'she', 'so',
+    'that', 'the', 'their', 'them', 'they', 'this', 'to', 'was', 'we',
+    'were', 'with', 'you', 'your', 'very'
+}
+try:
+    stop_words = set(stopwords.words('english'))
+except LookupError:
+    logger.warning("NLTK stopwords unavailable; using built-in fallback list")
+    stop_words = FALLBACK_STOP_WORDS
 lemmatizer = WordNetLemmatizer()
 sid        = SentimentIntensityAnalyzer()
 
@@ -90,8 +101,14 @@ HEDGING_WORDS = {
 def preprocess(text):
     text = str(text).lower()
     text = re.sub(r'[^a-z\s]', '', text)
-    tokens = [lemmatizer.lemmatize(t) for t in text.split()
-              if t not in stop_words and len(t) > 1]
+    tokens = []
+    for t in text.split():
+        if t in stop_words or len(t) <= 1:
+            continue
+        try:
+            tokens.append(lemmatizer.lemmatize(t))
+        except LookupError:
+            tokens.append(t)
     return ' '.join(tokens)
 
 

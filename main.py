@@ -26,7 +26,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.feature_selection import SelectKBest, mutual_info_classif, VarianceThreshold
 from sklearn.metrics import (roc_auc_score, f1_score, accuracy_score, confusion_matrix, 
                              roc_curve, precision_recall_curve, average_precision_score, 
-                             classification_report, recall_score, precision_score)
+                             classification_report, recall_score, precision_score,
+                             balanced_accuracy_score)
 from sklearn.calibration import calibration_curve
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
@@ -158,6 +159,15 @@ def main():
     # ── 1. LOAD DATA ─────────────────────────────────────────────────
     labels = pd.read_csv('data/features/master_labels.csv')
     text_df = pd.read_csv('data/features/text_features.csv')
+    text_enhanced_path = 'data/features/text_features_enhanced.csv'
+    if os.path.exists(text_enhanced_path):
+        text_enhanced_df = pd.read_csv(text_enhanced_path)
+        duplicate_cols = [c for c in text_enhanced_df.columns if c in text_df.columns and c != 'pid']
+        if duplicate_cols:
+            logger.info(f"Text enhanced features: dropping duplicate base columns: {duplicate_cols}")
+            text_enhanced_df = text_enhanced_df.drop(columns=duplicate_cols)
+        text_df = text_df.merge(text_enhanced_df, on='pid', how='left')
+        logger.info(f"Text feature set expanded to {text_df.shape[1] - 1} non-label columns")
     audio_df = pd.read_csv('data/features/audio_features_enhanced.csv')
     visual_df = pd.read_csv('data/features/visual_features.csv')
     
@@ -340,16 +350,22 @@ def main():
         preds = (probs_arr >= opt_t).astype(int)
         
         acc = accuracy_score(all_y_true, preds)
+        bal_acc = balanced_accuracy_score(all_y_true, preds)
         f1 = f1_score(all_y_true, preds, zero_division=0)
         rec = recall_score(all_y_true, preds, zero_division=0)
         prec = precision_score(all_y_true, preds, zero_division=0)
         report = classification_report(all_y_true, preds, output_dict=True, zero_division=0)
         macro_f1 = report['macro avg']['f1-score']
+        tn, fp, fn, tp = confusion_matrix(all_y_true, preds).ravel()
+        sensitivity = tp / (tp + fn) if (tp + fn) else 0.0
+        specificity = tn / (tn + fp) if (tn + fp) else 0.0
         
         metrics.append({
             'Model': name, 'AUC': round(auc, 4), 'AP': round(ap, 4),
-            'Accuracy': round(acc, 4), 'F1': round(f1, 4), 
+            'Accuracy': round(acc, 4), 'Balanced_Accuracy': round(bal_acc, 4),
+            'F1': round(f1, 4), 
             'Precision': round(prec, 4), 'Recall': round(rec, 4),
+            'Sensitivity': round(sensitivity, 4), 'Specificity': round(specificity, 4),
             'Macro-F1': round(macro_f1, 4), 'Threshold': round(opt_t, 2)
         })
         
@@ -441,9 +457,9 @@ def main():
     plt.close()
 
     # Accuracy Matrix (Heatmap)
-    df_metrics = pd.DataFrame(final_metrics)
+    df_metrics = metrics_df
     plt.figure(figsize=(10, 6))
-    sns.heatmap(df_metrics.set_index('Model')[['AUC', 'Accuracy', 'F1', 'Precision', 'Recall']], 
+    sns.heatmap(df_metrics.set_index('Model')[['Accuracy', 'Balanced_Accuracy', 'F1', 'Precision', 'Recall']], 
                 annot=True, cmap='Blues', fmt='.3f', annot_kws={"size": 14})
     plt.title('Performance Matrix by Modality', fontsize=16, fontweight='bold')
     plt.ylabel('')
