@@ -21,7 +21,7 @@ vaderSentiment==3.3.2
 python_speech_features==0.6
 
 # Sentence Embeddings
-sentence-transformers==2.2.2
+# sentence-transformers==2.2.2 (Disabled for Render free-tier memory limits)
 
 # Visualization
 matplotlib==3.7.1
